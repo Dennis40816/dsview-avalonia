@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Dennis40816
+# SPDX-License-Identifier: GPL-3.0-or-later
+**/bin/
+**/obj/
+.vs/
+.idea/
+artifacts/
+*.user
+*.suo
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db

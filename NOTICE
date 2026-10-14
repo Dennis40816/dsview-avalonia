@@ -1,0 +1,26 @@
+SPDX-FileCopyrightText: 2026 Dennis40816
+SPDX-License-Identifier: GPL-3.0-or-later
+
+dsview-avalonia
+Copyright (C) 2026 Dennis40816
+
+Original project material is free software: you can redistribute it and/or
+modify it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See LICENSE for the complete terms.
+
+The external/DSView submodule references the work of DreamSourceLab and
+other upstream contributors. Its files retain their own copyright and
+license notices. This project's license grant does not replace those
+notices or grant rights to third-party material.
+
+This is an independent project. It is not an official DreamSourceLab
+product or an official successor to DSView. Project and product names
+identify their respective projects; no trademark rights are granted here.
+
+THIRD-PARTY-NOTICES.md records the present source reference and incomplete
+dependency review. It is not a completed binary distribution notice bundle.

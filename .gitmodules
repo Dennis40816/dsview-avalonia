@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Dennis40816
+# SPDX-License-Identifier: GPL-3.0-or-later
+[submodule "external/DSView"]
+	path = external/DSView
+	url = https://github.com/DreamSourceLab/DSView.git
