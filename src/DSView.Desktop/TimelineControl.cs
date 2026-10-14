@@ -196,8 +196,9 @@ public sealed class TimelineControl : Control
             {
                 var preview = Format($"Preview D{hc} · " + TimingText.Local(measured, model.Capture.SampleRate), Ink("#C9F1EA"), 13);
                 labelX = Math.Clamp(X(hoverSample), LabelWidth, Math.Max(LabelWidth, LabelWidth + PlotWidth - preview.Width - 8));
-                context.FillRectangle(Surface, new(labelX, y - 20, preview.Width + 8, 22));
-                context.DrawText(preview, new(labelX + 4, y - 19));
+                // Keep the preview between the previous low line (rowTop - 17) and current high line (rowTop + 16).
+                context.FillRectangle(Surface, new(labelX, y - 16, preview.Width + 8, 22));
+                context.DrawText(preview, new(labelX + 4, y - 15));
             }
         }
     }
