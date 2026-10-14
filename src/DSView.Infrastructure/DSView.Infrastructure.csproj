@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../DSView.Domain/DSView.Domain.csproj" />
+    <EmbeddedResource Include="Fixtures/demo-capture.json" />
+  </ItemGroup>
+</Project>

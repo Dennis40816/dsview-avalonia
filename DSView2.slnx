@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DSView.Desktop/DSView.Desktop.csproj" />
+    <Project Path="src/DSView.Domain/DSView.Domain.csproj" />
+    <Project Path="src/DSView.Infrastructure/DSView.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DSView.Checks/DSView.Checks.csproj" />
+  </Folder>
+</Solution>
