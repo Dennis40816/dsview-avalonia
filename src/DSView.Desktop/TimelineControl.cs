@@ -14,6 +14,7 @@ public sealed class TimelineControl : Control
     public const double LabelWidth = 168, RowHeight = 52;
     private readonly Workbench model;
     private readonly bool overview;
+    private readonly bool rulerOnly;
     private readonly List<(Rect Bounds, Packet Packet)> hits = [];
     private Point press;
     private double pressStart, pressEnd;
@@ -26,9 +27,10 @@ public sealed class TimelineControl : Control
     public static IBrush Ink(string hex) => Brush.Parse(hex);
     private static readonly IBrush Text = Ink("#E4EAF0"), Muted = Ink("#9BAEBF"), Accent = Ink("#78D7C8"), Surface = Ink("#101820"), GridInk = Ink("#26343F");
     private static readonly Typeface Ui = new("fonts:Inter#Inter"), Mono = new("Cascadia Mono,Consolas");
-    public TimelineControl(Workbench workbench, bool isOverview = false)
+    public TimelineControl(Workbench workbench, bool isOverview = false, bool isRuler = false)
     {
-        model = workbench; overview = isOverview; ClipToBounds = true; Focusable = true; VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+        model = workbench; overview = isOverview; rulerOnly = isRuler; ClipToBounds = true; Focusable = true; VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+        if (overview) ToolTip.SetTip(this, "All decoded events across the capture. Undecoded signal activity is not included.");
         model.Changed += Refresh;
         Refresh();
         PointerPressed += Pressed; PointerMoved += Moved; PointerReleased += Released;
@@ -37,15 +39,15 @@ public sealed class TimelineControl : Control
         PointerWheelChanged += (_, e) => { if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) { model.Zoom(e.Delta.Y > 0 ? .8 : 1.25, Math.Clamp((e.GetPosition(this).X - LabelWidth) / PlotWidth, 0, 1)); e.Handled = true; } };
     }
     private double PlotWidth => Math.Max(1, Bounds.Width - LabelWidth - 16);
-    private double SignalsTop => 42 + model.Decoders.Count * 42 + 28;
+    private double SignalsTop => model.Decoders.Count * 42 + 28;
     private double X(double sample) => LabelWidth + (sample - model.Start) / (model.End - model.Start) * PlotWidth;
     private long Sample(double x) => (long)Math.Round(model.Start + (x - LabelWidth) / PlotWidth * (model.End - model.Start));
     private int? ChannelAt(double y)
     {
         int index = (int)Math.Floor((y - SignalsTop) / RowHeight);
-        return index >= 0 && index < model.Signals.Count ? model.Signals[index].Id : null;
+        return !rulerOnly && index >= 0 && index < model.Signals.Count ? model.Signals[index].Id : null;
     }
-    private void Refresh() { Height = overview ? 48 : Math.Max(330, SignalsTop + model.Signals.Count * RowHeight + 16); InvalidateVisual(); }
+    private void Refresh() { if (!down) hoverChannel = null; Height = overview ? 40 : rulerOnly ? 42 : Math.Max(288, SignalsTop + model.Signals.Count * RowHeight + 16); InvalidateVisual(); }
     public override void Render(DrawingContext context)
     {
         context.FillRectangle(Surface, Bounds.WithX(0).WithY(0));
@@ -56,17 +58,18 @@ public sealed class TimelineControl : Control
         var rough = spanUs / Math.Max(2, PlotWidth / 110);
         var power = Math.Pow(10, Math.Floor(Math.Log10(rough)));
         var tickUs = new[] { 1d, 2, 5, 10 }.First(n => n * power >= rough) * power;
-        Label(context, "Time · µs", 16, 13, Muted, 12);
+        if (rulerOnly) Label(context, "Time · µs", 16, 13, Muted, 12);
         for (double tick = Math.Ceiling(model.Us(model.Start) / tickUs) * tickUs; tick <= model.Us(model.End); tick += tickUs)
         {
             var x = X(tick * model.Capture.SampleRate / 1_000_000);
-            context.DrawLine(new Pen(GridInk, 1), new(x, 36), new(x, Height));
+            context.DrawLine(new Pen(GridInk, 1), new(x, rulerOnly ? 36 : 0), new(x, Height));
             var str = tick.ToString("0.###", CultureInfo.InvariantCulture);
-            Label(context, str, Math.Clamp(x - 10, LabelWidth, Bounds.Width - 55), 13, Muted, 12);
+            if (rulerOnly) Label(context, str, Math.Clamp(x - 10, LabelWidth, Bounds.Width - 55), 13, Muted, 12);
         }
+        if (rulerOnly) { DrawMarker(context, model.A, "A", false); DrawMarker(context, model.B, "B", true); return; }
         foreach (var (decoder, index) in model.Decoders.Select((d, i) => (d, i)))
         {
-            var y = 42 + index * 42;
+            var y = index * 42;
             Label(context, decoder.Name, 16, y + 9, Text, 13);
             using (context.PushClip(new Rect(LabelWidth, y, PlotWidth, 38)))
             foreach (var packet in model.Capture.Packets.Where(p => p.Decoder == decoder.Id && p.Span.End >= model.Start && p.Span.Start <= model.End))
@@ -101,12 +104,14 @@ public sealed class TimelineControl : Control
                     string label = item.Label;
                     if (item.Kind == "ack" && width < 32) label = "A";
                     var ft = Format(label, item.Kind == "ack" ? Muted : Accent, 11.5, true);
+                    if (ft.Width > width - 6 && !detailed && item.Kind == "data")
+                        ft = Format(packet.Decoder == "i2c" ? packet.Address + " W" : $"{packet.Bytes.Length} B", Accent, 11.5, true);
                     if (ft.Width <= width - 6) context.DrawText(ft, new(left + (width - ft.Width) / 2, y + 10));
                     hits.Add((rect, packet));
                 }
             }
         }
-        Label(context, $"Signals  {model.Signals.Count} of 32", 16, SignalsTop - 22, Muted, 12);
+        Label(context, "Signals", 16, SignalsTop - 22, Muted, 12);
         context.DrawLine(new Pen(GridInk, 1), new(0, SignalsTop - 7), new(Bounds.Width, SignalsTop - 7));
         if (model.Selected is { } selected && model.SelectionInGroup)
         {
@@ -118,7 +123,7 @@ public sealed class TimelineControl : Control
             var y = SignalsTop + index * RowHeight;
             context.FillRectangle(Ink(Probe[signal.Id % 8]), new(15, y + 16, 5, 20));
             Label(context, $"D{signal.Id}", 26, y + 18, Muted, 12);
-            Label(context, signal.Name, 57, y + 17, Text, 12);
+            using (context.PushClip(new Rect(57, y, 80, RowHeight))) Label(context, signal.Name, 57, y + 17, Text, 12);
             IBrush color = Ink(model.Colors.GetValueOrDefault(signal.Id, signal.Id == 0 ? "#D4AD00" : "#C7D2DB"));
             context.DrawLine(new Pen(color, 2), new(142, y + 26), new(158, y + 26));
             using (context.PushClip(new Rect(LabelWidth, y, PlotWidth, RowHeight)))
@@ -141,29 +146,37 @@ public sealed class TimelineControl : Control
             }
         }
         DrawMarker(context, model.A, "A", false); DrawMarker(context, model.B, "B", true);
-        if (hoverChannel is int hc && model.Mode == 0 && !down)
+        if (hoverChannel is int hc && model.Armed == null && !down && model.Signals.Any(s => s.Id == hc))
         {
-            var pair = model.Capture.Signals.First(s => s.Id == hc).Surrounding(hoverSample);
-            if (pair is { } p)
+            var measured = model.Capture.MeasureAt(hc, hoverSample);
+            var y = SignalsTop + model.Signals.ToList().FindIndex(s => s.Id == hc) * RowHeight + 3;
+            double labelX = Math.Clamp(X(hoverSample), LabelWidth, Math.Max(LabelWidth, Bounds.Width - 430));
+            if (measured.Pulse is { } pulse)
             {
-                var y = SignalsTop + model.Signals.ToList().FindIndex(s => s.Id == hc) * RowHeight + 3;
-                double x1 = Math.Clamp(X(p.A.Sample), LabelWidth, LabelWidth + PlotWidth), x2 = Math.Clamp(X(p.B.Sample), LabelWidth, LabelWidth + PlotWidth);
+                double x1 = Math.Clamp(X(pulse.Start), LabelWidth, LabelWidth + PlotWidth), x2 = Math.Clamp(X(pulse.End), LabelWidth, LabelWidth + PlotWidth);
                 context.DrawLine(new Pen(Accent, 1), new(x1, y), new(x2, y));
-                Label(context, $"Δ {model.Us(p.B.Sample - p.A.Sample):0.###} µs", Math.Clamp(x1 + 5, LabelWidth, Bounds.Width - 110), y - 13, Accent, 11);
             }
+            var preview = Format("Preview · " + TimingText.Local(measured, model.Capture.SampleRate), Accent, 11);
+            context.FillRectangle(Surface, new(labelX, y - 15, preview.Width + 10, 17));
+            context.DrawText(preview, new(labelX + 4, y - 14));
         }
     }
     private void DrawMarker(DrawingContext context, Endpoint? marker, string name, bool dashed)
     {
         if (marker == null || marker.Sample < model.Start || marker.Sample > model.End) return;
         var x = X(marker.Sample);
-        context.DrawLine(new Pen(Accent, 1, dashed ? DashStyle.Dash : null), new(x, 35), new(x, Height));
-        context.FillRectangle(Ink("#183D3A"), new(Math.Clamp(x - 9, LabelWidth, LabelWidth + PlotWidth - 18), 28, 18, 17));
-        Label(context, name, Math.Clamp(x - 4, LabelWidth + 5, LabelWidth + PlotWidth - 13), 29, Accent, 11);
+        context.DrawLine(new Pen(Accent, 1, dashed ? DashStyle.Dash : null), new(x, rulerOnly ? 35 : 0), new(x, Height));
+        if (!rulerOnly) return;
+        var other = name == "A" ? model.B : model.A;
+        bool close = other != null && Math.Abs(X(other.Sample) - x) < 20;
+        if (close && name == "B") return;
+        double tagWidth = close ? 30 : 18, tagX = Math.Clamp(x - tagWidth / 2, LabelWidth, LabelWidth + PlotWidth - tagWidth);
+        context.FillRectangle(Ink("#183D3A"), new(tagX, 28, tagWidth, 17));
+        Label(context, close ? "A/B" : name, tagX + 4, 29, Accent, 11);
     }
     private void DrawOverview(DrawingContext context)
     {
-        Label(context, "Overview · 1 ms", 16, 16, Muted, 12);
+        Label(context, "Decoded overview", 16, 13, Muted, 12);
         context.FillRectangle(Ink("#18242E"), new(LabelWidth, 7, PlotWidth, 33));
         foreach (var packet in model.Capture!.Packets)
         {
@@ -184,6 +197,7 @@ public sealed class TimelineControl : Control
         Focus(); var p = e.GetPosition(this);
         if (overview) { model.Remember(); var center = Math.Clamp((p.X - LabelWidth) / PlotWidth, 0, 1) * model.Capture.SampleCount; var half = (model.End - model.Start) / 2; model.SetRange(center - half, center + half); e.Handled = true; return; }
         if (p.X < LabelWidth) { if (p.X >= 135 && ChannelAt(p.Y) is int c) ColorRequested?.Invoke(c); return; }
+        if (p.X > LabelWidth + PlotWidth) return;
         press = p; pressStart = model.Start; pressEnd = model.End; down = true; dragged = false;
         double distanceA = model.A is { } a ? Math.Abs(X(a.Sample) - p.X) : double.PositiveInfinity;
         double distanceB = model.B is { } b ? Math.Abs(X(b.Sample) - p.X) : double.PositiveInfinity;
@@ -192,7 +206,12 @@ public sealed class TimelineControl : Control
     }
     private void Moved(object? sender, PointerEventArgs e)
     {
-        var p = e.GetPosition(this); hoverChannel = p.X >= LabelWidth ? ChannelAt(p.Y) : null; hoverSample = Sample(p.X);
+        var p = e.GetPosition(this); hoverChannel = p.X >= LabelWidth && p.X <= LabelWidth + PlotWidth ? ChannelAt(p.Y) : null; hoverSample = Sample(p.X);
+        if (!overview && !rulerOnly)
+        {
+            var labelChannel = p.X < LabelWidth ? ChannelAt(p.Y) : null;
+            ToolTip.SetTip(this, labelChannel is int id ? $"D{id} · {model.Signals.First(s => s.Id == id).Name}" + (p.X >= 135 ? " · Click to change waveform color" : " · Physical probe identity") : null);
+        }
         if (!down) { InvalidateVisual(); return; }
         if (!dragged && Math.Abs(p.X - press.X) > 4) { dragged = true; if (dragEndpoint == null) model.Remember(); }
         if (!dragged) return;

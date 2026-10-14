@@ -11,13 +11,39 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 ## 目前狀態
 
-目前是 repository 基礎建置階段。**授權清查尚未完成，目前不提供 binary 發行。**
+目前已有可執行的原生 Avalonia **離線工作區**，使用合成波形及預先產生的解析資料。
+尚未接硬體擷取、raw protocol decoder、擷取檔匯入及分析工作階段保存／還原。
+**授權清查尚未完成，目前不提供 binary 發行。**
 
-此版本只有授權、repository 文件與固定版本的上游來源指標。
-尚未包含可執行的 Avalonia 程式、native bridge、解析器實作或已驗證的建置流程。
+已提供一次一個 Group、全部通道、自訂波形線色、Hex 封包內容、高／低脈寬、完整局部週期／頻率，以及跨通道 A/B edge／位置量測。
+捲動通道時時間尺保持可見。局部頻率不代表整段資料具有穩定的時鐘頻率。
 
-介面規劃以波形為主，包含清楚的字體、多層解碼標註、可展開的封包內容與命名時間量測。
-這些是開發目標，尚非本版本已實作的能力。
+## 執行離線工作區
+
+使用 `global.json` 指定的 .NET SDK（10.0.303，允許最新 patch）：
+
+```sh
+dotnet restore DSView2.slnx --locked-mode
+dotnet build DSView2.slnx --no-restore
+dotnet run --project src/DSView.Desktop --no-build
+```
+
+聚焦的數值及狀態檢查：
+
+```sh
+dotnet run --project tests/DSView.Checks --no-build
+```
+
+先選 Group 或 All signals。指向脈衝可預覽量測，點一下固定結果。
+Measure A/B 依序選兩個參考點；Position 可量指定的取樣位置。
+Esc 取消選點或尚未提交的數值修改。Ctrl＋滾輪縮放，拖曳波形空白處平移。
+選封包可看內容，Locate source 才會移動時間視野；Fit time 顯示完整時間範圍。
+
+實體探針色條固定。點訊號名稱旁獨立的短線可改波形顏色。
+Group／線色偏好會保存；量測與擷取工作階段尚未保存。
+
+已操作驗證 Windows 原生介面。其他桌面平台、完整 DPI 組合及大資料效能仍待驗證。
+合成範例不能證明真實裝置的時間精度或解析器正確性。
 
 Binary 發行前需補齊上游來源與許可證據，確認實際建置及執行相依，並建立軟體物料清單（SBOM）。
 詳見 [第三方清查狀態](THIRD-PARTY-NOTICES.md)。

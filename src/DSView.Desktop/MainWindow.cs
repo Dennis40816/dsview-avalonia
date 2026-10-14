@@ -17,68 +17,91 @@ public sealed class MainWindow : Window
 {
     public Workbench Model { get; } = new();
     private readonly ComboBox groupPicker = new() { MinWidth = 205 };
-    private readonly ComboBox modePicker = new() { ItemsSource = new[] { "Nearby edges", "A/B edge", "A/B position" }, SelectedIndex = 0, Width = 155 };
+    private readonly ComboBox modePicker = new() { ItemsSource = new[] { "Snap to edge", "Position" }, SelectedIndex = 0, Width = 134 };
     private readonly ComboBox edgeChannel = new() { Width = 74 };
-    private readonly TextBlock range = Text(""), groupSummary = Text("", true), status = Text("Loading saved demo…", true), hint = Text("", true), delta = Text(""), footer = Text("", true), selectedLabel = Text("", true);
+    private readonly TextBlock range = Text(""), groupSummary = Text("", true), status = Text("Loading…", true), hint = Text("", true), delta = Text("");
     private readonly TextBox aTime = new() { Width = 95 }, bTime = new() { Width = 95 };
     private readonly TextBlock aSource = Text("A", true), bSource = Text("B", true);
-    private readonly StackPanel endpoints = Row(), inspector = new() { Spacing = 14, Margin = new Thickness(18) };
+    private readonly TextBlock packetContext = Text("", true);
+    private readonly WrapPanel endpoints = new() { Orientation = Orientation.Horizontal };
+    private readonly StackPanel inspector = new() { Spacing = 14, Margin = new Thickness(16) };
+    private readonly StackPanel measurement = new() { Spacing = 8, Margin = new(16, 8) };
+    private readonly StackPanel measurementActions = Row();
+    private readonly Grid navigation = new() { ColumnDefinitions = new("Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"), Margin = new(16, 0), Height = 38 };
+    private readonly TimelineControl overview;
     private readonly Grid workspace = new() { ColumnDefinitions = new("*,0,0") };
     private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), FontSize = 12, Background = Brushes.Transparent };
     private readonly TextBox search = new() { PlaceholderText = "Search packets, Hex or fields", Margin = new(14, 8) };
-    private readonly Button waveTab, packetTab, detailButton, reloadButton;
+    private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton;
     private readonly Control wavePanel, packetPanel;
     private readonly Border inspectorBorder;
     private readonly GridSplitter splitter = new() { Width = 4, Background = TimelineControl.Ink("#26343F"), ResizeDirection = GridResizeDirection.Columns };
     private CancellationTokenSource? loadCancellation;
     private int generation;
     private bool updating;
+    private Packet? renderedPacket;
     private readonly string preferencePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DSView2", "workbench.json");
     public MainWindow()
     {
-        Title = "DSView2 · Native workbench · Offline demo"; Width = 1380; Height = 850; MinWidth = 1024; MinHeight = 650;
+        Title = "DSView2 · Offline demo"; Width = 1380; Height = 850; MinWidth = 1024; MinHeight = 650;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         RestorePreferences();
-        var page = new Grid { RowDefinitions = new("50,44,42,48,*,38,Auto,28") };
-        var header = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,*,Auto,Auto"), Margin = new(16, 0) };
+        var page = new Grid { RowDefinitions = new("44,44,Auto,Auto,*,Auto") };
+        var header = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,*,Auto"), Margin = new(16, 0) };
         var brand = Text("DSView2"); brand.FontWeight = FontWeight.SemiBold; brand.Margin = new(0, 0, 20, 0);
         Add(header, brand, 0, 0);
         waveTab = Button("Waveforms", () => Model.SetTab(false), "flat"); packetTab = Button("Packets", () => Model.SetTab(true), "flat");
-        Add(header, waveTab, 0, 1); Add(header, packetTab, 0, 2); status.HorizontalAlignment = HorizontalAlignment.Right; status.Margin = new(12, 0); Add(header, status, 0, 3);
-        Add(header, Button("Demo info", ShowInfo), 0, 4); reloadButton = Button("Reload demo", async () => await LoadAsync(), "primary"); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
+        Add(header, waveTab, 0, 1); Add(header, packetTab, 0, 2);
+        var source = Button("", ShowInfo, "flat", "Capture source and acquisition details"); source.Content = status; source.HorizontalAlignment = HorizontalAlignment.Right; Add(header, source, 0, 3);
+        reloadButton = Button("Reload demo", async () => await LoadAsync()); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 4);
         Add(page, Band(header), 0);
-        var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,*,Auto"), Margin = new(16, 0) };
+        var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto"), Margin = new(16, 0) };
         Add(groupBar, Text("Group", true), 0, 0); groupPicker.Margin = new(10, 0); groupPicker.ItemsSource = Model.Groups; groupPicker.SelectedItem = Model.Group;
         groupPicker.SelectionChanged += (_, _) => { if (!updating && groupPicker.SelectedItem is ObservationGroup group) Model.SetGroup(group); };
-        Add(groupBar, groupPicker, 0, 1); Add(groupBar, Button("Edit group", () => EditGroup(false), "flat"), 0, 2); groupSummary.Margin = new(12, 0); Add(groupBar, groupSummary, 0, 3); Add(groupBar, Button("All signals · 32", Model.ShowAll), 0, 4); Add(page, Band(groupBar), 1);
-        var nav = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto"), Margin = new(16, 0) };
+        Add(groupBar, groupPicker, 0, 1); Add(groupBar, Button("Edit", () => EditGroup(false), "flat", "Edit signal group"), 0, 2);
+        Add(groupBar, Button("All signals", Model.ShowAll, "flat"), 0, 3); groupSummary.Margin = new(12, 0); Add(groupBar, groupSummary, 0, 4);
+        detailButton = Button("Packet details", Model.ToggleDetails, "flat"); Add(groupBar, detailButton, 0, 5);
+        measureButton = Button("Measure A/B", () => Model.SetMode(1), "flat", "Choose two edges or positions, on any channels"); Add(groupBar, measureButton, 0, 6); Add(page, Band(groupBar), 1);
+        var nav = navigation;
         Add(nav, Button("←", Model.Previous, "flat", "Previous view"), 0, 0); Add(nav, Button("Fit time", Model.FitTime, "flat"), 0, 1);
         Add(nav, Button("−", () => Model.Zoom(1.5), "flat", "Zoom out"), 0, 2); Add(nav, Button("+", () => Model.Zoom(1 / 1.5), "flat", "Zoom in"), 0, 3);
-        range.Margin = new(14, 0); Add(nav, range, 0, 4); Add(nav, Text("Edge", true), 0, 5); edgeChannel.Margin = new(8, 0); Add(nav, edgeChannel, 0, 6);
-        Add(nav, Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge"), 0, 7); Add(nav, Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge"), 0, 8); Add(page, nav, 2);
-        Add(page, new TimelineControl(Model, true), 3);
+        range.Margin = new(14, 0); Add(nav, range, 0, 4); edgeChannel.Margin = new(14, 0, 4, 0); ToolTip.SetTip(edgeChannel, "Signal for previous / next edge"); Add(nav, edgeChannel, 0, 5);
+        Add(nav, Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge"), 0, 6); Add(nav, Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge"), 0, 7);
+        var guide = Text("Hover to measure · Ctrl + wheel to zoom", true); guide.HorizontalAlignment = HorizontalAlignment.Right; Add(nav, guide, 0, 8); Add(page, nav, 2);
+        overview = new TimelineControl(Model, true); Add(page, overview, 3);
         var timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
-        wavePanel = new ScrollViewer { Content = timeline, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        var ruler = new TimelineControl(Model, isRuler: true) { HorizontalAlignment = HorizontalAlignment.Left };
+        timeline.SizeChanged += (_, _) => ruler.Width = timeline.Bounds.Width;
+        var waveformGrid = new Grid { RowDefinitions = new("42,*") };
+        Add(waveformGrid, ruler, 0);
+        Add(waveformGrid, new ScrollViewer { Content = timeline, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, 1);
+        wavePanel = waveformGrid;
         var packetGrid = new Grid { RowDefinitions = new("Auto,*") }; Add(packetGrid, search, 0); Add(packetGrid, packets, 1); packetPanel = packetGrid;
         search.TextChanged += (_, _) => { if (!updating) Model.Search(search.Text ?? ""); };
         packets.SelectionChanged += (_, _) => { if (!updating && packets.SelectedItem is Packet packet) Model.Select(packet); };
         var work = new Grid(); work.Children.Add(wavePanel); work.Children.Add(packetPanel); Add(workspace, work, 0, 0); Add(workspace, splitter, 0, 1);
         inspectorBorder = new Border { BorderBrush = TimelineControl.Ink("#26343F"), BorderThickness = new(1, 0, 0, 0), Child = new ScrollViewer { Content = inspector, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled } };
         Add(workspace, inspectorBorder, 0, 2); Add(page, workspace, 4);
-        var selection = new Grid { ColumnDefinitions = new("*,Auto,Auto"), Margin = new(16, 0) }; Add(selection, selectedLabel, 0, 0); Add(selection, Button("Locate source", Model.Locate, "flat"), 0, 1); detailButton = Button("Details", Model.ToggleDetails, "flat"); Add(selection, detailButton, 0, 2); Add(page, Band(selection), 5);
-        var measurement = new StackPanel { Spacing = 8, Margin = new(16, 8) };
-        var modes = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*") }; Add(modes, Text("Measure", true), 0, 0); modePicker.Margin = new(10, 0); Add(modes, modePicker, 0, 1);
-        Add(modes, Button("Choose A", () => Model.Arm(0), "flat"), 0, 2); Add(modes, Button("Choose B", () => Model.Arm(1), "flat"), 0, 3); hint.TextTrimming = TextTrimming.CharacterEllipsis; hint.Margin = new(12, 0); Add(modes, hint, 0, 4);
-        modePicker.SelectionChanged += (_, _) => { if (!updating) Model.SetMode(modePicker.SelectedIndex); };
-        endpoints.Children.Add(aSource); endpoints.Children.Add(aTime); endpoints.Children.Add(Text("µs", true)); endpoints.Children.Add(bSource); endpoints.Children.Add(bTime); endpoints.Children.Add(Text("µs", true)); delta.Foreground = TimelineControl.Ink("#78D7C8"); delta.Margin = new(20, 0); endpoints.Children.Add(delta);
-        endpoints.Children.Add(Button("Fit A/B", Model.FitMarkers, "flat")); endpoints.Children.Add(Button("Clear", Model.Clear, "flat"));
+        var result = new Grid { ColumnDefinitions = new("*,Auto") }; delta.Foreground = TimelineControl.Ink("#78D7C8"); Add(result, delta, 0, 0);
+        measurementActions.Children.Add(modePicker); measurementActions.Children.Add(Button("Cancel", CancelEditing, "flat"));
+        measurementActions.Children.Add(Button("Fit A/B", Model.FitMarkers, "flat")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat")); Add(result, measurementActions, 0, 1);
+        modePicker.SelectionChanged += (_, _) => { if (!updating) Model.SetSnapMode(modePicker.SelectedIndex == 1 ? 2 : 1); };
+        foreach (var (label, box, index) in new[] { (aSource, aTime, 0), (bSource, bTime, 1) })
+        {
+            var endpoint = Row(); endpoint.Margin = new(0, 0, 22, 0); endpoint.Children.Add(label); endpoint.Children.Add(box); endpoint.Children.Add(Text("µs", true));
+            endpoint.Children.Add(Button("Choose", () => Model.Arm(index), "flat", "Replace only this endpoint")); endpoints.Children.Add(endpoint);
+        }
         aTime.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitTime(0, aTime); }; bTime.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitTime(1, bTime); };
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
-        measurement.Children.Add(modes); measurement.Children.Add(endpoints); Add(page, Band(measurement), 6);
-        var bottom = new Grid { ColumnDefinitions = new("*,Auto"), Margin = new(16, 0) }; Add(bottom, footer, 0, 0); Add(bottom, Text("50 MS/s · Synthetic source · Native Avalonia", true), 0, 1); Add(page, Band(bottom), 7);
+        hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(page, Band(measurement), 5);
         Content = page; Model.Changed += Refresh;
         Opened += async (_, _) => await LoadAsync(); Closing += (_, _) => { loadCancellation?.Cancel(); SavePreferences(); };
-        KeyDown += (_, e) => { if (e.Key == Key.Escape && Model.Details) Model.ToggleDetails(); };
+        KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape) return;
+            if (Model.Armed != null || aTime.IsFocused || bTime.IsFocused) { CancelEditing(); e.Handled = true; }
+            else if (Model.Details) Model.ToggleDetails();
+        };
         Refresh();
     }
     private int SelectedEdgeChannel() => edgeChannel.SelectedItem is string str && int.TryParse(str.AsSpan(1), out var id) ? id : Model.Group.Channels.FirstOrDefault();
@@ -86,7 +109,7 @@ public sealed class MainWindow : Window
     {
         loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new(); int current = ++generation;
         status.Text = "Loading saved demo…"; reloadButton.IsEnabled = false;
-        try { var capture = await DemoCaptureSource.LoadAsync(loadCancellation.Token); if (current == generation) { Model.Load(capture); status.Text = "Saved demo · 1 ms · offline"; } }
+        try { var capture = await DemoCaptureSource.LoadAsync(loadCancellation.Token); if (current == generation) { Model.Load(capture); status.Text = $"Offline demo · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}"; } }
         catch (OperationCanceledException) { }
         catch (Exception ex) { status.Text = "Could not load demo: " + ex.Message; }
         finally { if (current == generation) reloadButton.IsEnabled = true; }
@@ -96,43 +119,66 @@ public sealed class MainWindow : Window
         if (updating) return; updating = true;
         try
         {
-            groupPicker.SelectedItem = Model.Group; groupSummary.Text = $"{Model.Group.Channels.Length} signals · {Model.Group.Decoders.Length} decoders";
-            range.Text = Model.RangeText; footer.Text = $"32 physical · 32 captured · {Model.Group.Channels.Length} in view";
-            var old = edgeChannel.SelectedItem as string; var choices = Model.Group.Channels.Select(c => $"D{c}").ToArray(); edgeChannel.ItemsSource = choices; edgeChannel.SelectedItem = choices.Contains(old) ? old : choices.FirstOrDefault();
+            groupPicker.SelectedItem = Model.Group; groupSummary.Text = $"{Model.Signals.Count} of {Model.Capture?.Signals.Count ?? 0} captured";
+            range.Text = Model.RangeText;
+            var old = edgeChannel.SelectedItem as string; var choices = Model.Group.Channels.Select(c => $"D{c}").ToArray();
+            if (!(edgeChannel.ItemsSource?.Cast<string>().SequenceEqual(choices) ?? false)) { edgeChannel.ItemsSource = choices; edgeChannel.SelectedItem = choices.Contains(old) ? old : choices.FirstOrDefault(); }
             wavePanel.IsVisible = !Model.PacketsTab; packetPanel.IsVisible = Model.PacketsTab;
+            navigation.IsVisible = overview.IsVisible = measureButton.IsVisible = !Model.PacketsTab;
             waveTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#9BAEBF") : TimelineControl.Ink("#78D7C8"); packetTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#78D7C8") : TimelineControl.Ink("#9BAEBF");
-            if (Model.PacketsTab) { packets.ItemsSource = Model.Packets.ToArray(); packets.SelectedItem = Model.Selected; }
-            modePicker.SelectedIndex = Model.Mode; hint.Text = Model.Hint; ToolTip.SetTip(hint, Model.Hint);
-            endpoints.IsVisible = Model.A != null || Model.B != null;
+            if (Model.PacketsTab) { var values = Model.Packets.ToArray(); if (!(packets.ItemsSource?.Cast<Packet>().SequenceEqual(values) ?? false)) packets.ItemsSource = values; packets.SelectedItem = Model.Selected; }
+            modePicker.SelectedIndex = Model.Mode == 2 ? 1 : 0; hint.Text = Model.Hint; hint.IsVisible = !string.IsNullOrEmpty(Model.Hint);
+            bool hasMarkers = Model.A != null || Model.B != null;
+            measurement.IsVisible = !Model.PacketsTab && (hasMarkers || Model.Armed != null || hint.IsVisible);
+            endpoints.IsVisible = Model.Mode != 0 && (hasMarkers || Model.Armed != null);
+            modePicker.IsVisible = Model.Mode != 0;
+            measurementActions.Children[1].IsVisible = Model.Armed != null;
+            measurementActions.Children[2].IsVisible = Model.A != null && Model.B != null;
+            measurementActions.Children[3].IsVisible = hasMarkers || hint.IsVisible;
             if (!aTime.IsFocused) aTime.Text = Model.A == null ? "" : Model.Us(Model.A.Sample).ToString("0.###", CultureInfo.InvariantCulture);
             if (!bTime.IsFocused) bTime.Text = Model.B == null ? "" : Model.Us(Model.B.Sample).ToString("0.###", CultureInfo.InvariantCulture);
             aTime.IsEnabled = Model.A != null; bTime.IsEnabled = Model.B != null;
             aSource.Text = EndpointLabel(Model.A, "A"); bSource.Text = EndpointLabel(Model.B, "B");
-            delta.Text = Model.A == null || Model.B == null ? "Choose both endpoints" : $"Δt {Model.Us(Model.B.Sample - Model.A.Sample):0.###} µs";
+            delta.Text = Model.Armed is int armed ? $"Choose {(armed == 0 ? "A" : "B")} · {(Model.Mode == 2 ? "position" : "edge")}" : Model.PinnedMeasurement is { } local && Model.Capture is { } capture ? $"D{local.Channel} · {TimingText.Local(local, capture.SampleRate)}"
+                : Model.A == null || Model.B == null ? "A/B measurement" : $"B − A   {(Model.B.Sample > Model.A.Sample ? "+" : "")}{TimingText.Duration((Model.B.Sample - Model.A.Sample) / (double)Model.Capture!.SampleRate)}";
+            ToolTip.SetTip(delta, Model.Armed != null ? Model.Hint : Model.PinnedMeasurement is { } m ? $"Local measurement · pulse samples {m.Pulse?.Start}–{m.Pulse?.End}\n" + (m.Cycle is { } cycle ? $"Cycle samples {cycle.Start}–{cycle.End}. This is a local cycle, not a capture-wide frequency." : m.Reason) : "Signed interval between A and B");
             ToolTip.SetTip(aSource, Model.A == null ? "" : $"Sample {Model.A.Sample} · {(Model.A.IsEdge ? "edge" : "position")}"); ToolTip.SetTip(bSource, Model.B == null ? "" : $"Sample {Model.B.Sample} · {(Model.B.IsEdge ? "edge" : "position")}");
-            selectedLabel.Text = Model.Selected == null ? "Select a protocol item or packet to inspect it." : $"{Model.Selected.Id} · {Model.Selected.Address}" + (!Model.SelectionInGroup ? " · Packet outside group" : Model.Selected.Span.End < Model.Start || Model.Selected.Span.Start > Model.End ? " · Outside time view" : "");
             bool showDetails = Model.Details && Model.Selected != null;
             if (showDetails && workspace.ColumnDefinitions[2].Width.Value == 0) { workspace.ColumnDefinitions[1].Width = new(4); workspace.ColumnDefinitions[2].Width = new(320); }
             if (!showDetails) { workspace.ColumnDefinitions[1].Width = new(0); workspace.ColumnDefinitions[2].Width = new(0); }
-            inspectorBorder.IsVisible = splitter.IsVisible = showDetails; detailButton.IsEnabled = Model.Selected != null; detailButton.Content = showDetails ? "Hide details" : "Details";
-            if (showDetails) RenderInspector();
+            inspectorBorder.IsVisible = splitter.IsVisible = showDetails; detailButton.IsVisible = Model.Selected != null && !showDetails;
+            if (showDetails && !ReferenceEquals(renderedPacket, Model.Selected)) { RenderInspector(); renderedPacket = Model.Selected; }
+            packetContext.Text = !Model.SelectionInGroup ? "Source signals are outside this group" : Model.Selected is { } p && (p.Span.End < Model.Start || p.Span.Start > Model.End) ? "Source is outside the time view" : "";
+            packetContext.IsVisible = !Model.PacketsTab && !string.IsNullOrEmpty(packetContext.Text);
         }
         finally { updating = false; }
     }
-    private string EndpointLabel(Endpoint? endpoint, string name) => endpoint == null ? name : $"{name} · D{endpoint.Channel}" + (Model.Group.Channels.Contains(endpoint.Channel) ? "" : " (hidden)");
+    private string EndpointLabel(Endpoint? endpoint, string name)
+    {
+        if (endpoint == null) return name;
+        var edge = endpoint.IsEdge ? Model.Capture?.Signals.First(s => s.Id == endpoint.Channel).Nearest(endpoint.Sample) : null;
+        return $"{name} · D{endpoint.Channel} {(edge == null ? "position" : edge.High ? "↑" : "↓")}" + (Model.Group.Channels.Contains(endpoint.Channel) ? "" : " (hidden)");
+    }
     private void CommitTime(int index, TextBox box)
     {
         if (updating || !box.IsEnabled) return;
-        if (!double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) || !Model.EditEndpoint(index, value))
-        { var point = index == 0 ? Model.A : Model.B; box.Text = point == null ? "" : Model.Us(point.Sample).ToString("0.###", CultureInfo.InvariantCulture); }
+        if (double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) Model.EditEndpoint(index, value);
+        var point = index == 0 ? Model.A : Model.B; box.Text = point == null ? "" : Model.Us(point.Sample).ToString("0.###", CultureInfo.InvariantCulture);
+    }
+    private void CancelEditing()
+    {
+        Model.CancelPick();
+        aTime.Text = Model.A == null ? "" : Model.Us(Model.A.Sample).ToString("0.###", CultureInfo.InvariantCulture);
+        bTime.Text = Model.B == null ? "" : Model.Us(Model.B.Sample).ToString("0.###", CultureInfo.InvariantCulture);
     }
     private void RenderInspector()
     {
         inspector.Children.Clear(); var packet = Model.Selected!;
-        inspector.Children.Add(Text(packet.Decoder.ToUpperInvariant() + "  /  " + packet.Id, true));
+        var heading = new Grid { ColumnDefinitions = new("*,Auto") }; Add(heading, Text(packet.Decoder.ToUpperInvariant() + " / " + packet.Id, true), 0, 0); Add(heading, Button("×", Model.ToggleDetails, "flat", "Close packet details"), 0, 1); inspector.Children.Add(heading);
         var title = Text(packet.Title); title.FontSize = 18; title.FontWeight = FontWeight.SemiBold; inspector.Children.Add(title);
         inspector.Children.Add(Text($"{Model.Us(packet.Span.Start):0.##}–{Model.Us(packet.Span.End):0.##} µs", true));
-        inspector.Children.Add(Text(packet.Address + " · " + packet.Bytes.Length + " data bytes"));
+        packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
+        inspector.Children.Add(Text(packet.Address + (packet.Decoder == "i2c" ? " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
         inspector.Children.Add(Text("Data bytes · Hex", true));
         inspector.Children.Add(new TextBlock { Text = packet.Hex, FontFamily = new("Cascadia Mono,Consolas"), FontSize = 15, TextWrapping = TextWrapping.Wrap });
         if (packet.Fields.Count > 0)
@@ -150,7 +196,7 @@ public sealed class MainWindow : Window
             var error = new TextBlock { Text = (packet.Decoder == "i2c" ? "DemoFrame · " : "") + packet.Error, TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#FF9AAA") };
             inspector.Children.Add(new Border { Child = error, Padding = new(12), Background = TimelineControl.Ink("#40232D") });
         }
-        if (packet.Decoder == "i2c") inspector.Children.Add(new TextBlock { Text = "I²C · Address and all 6 data bytes ACK. DemoFrame diagnostics do not invalidate the bus transaction.", TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF"), FontSize = 12 });
+        if (packet.Decoder == "i2c") inspector.Children.Add(Text("I²C · Address + data ACK", true));
         inspector.Children.Add(Button("Locate source", Model.Locate));
     }
     private async void EditGroup(bool create)

@@ -5,10 +5,33 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 # Third-party sources and review status
 
-License clearance is incomplete. This bootstrap has no application binaries,
-dependency packages, fonts, icons, device firmware, or customer capture files.
-This document is a source-reference inventory, not a completed runtime SBOM or
-binary distribution notice bundle.
+License clearance is incomplete. The native offline workbench now restores
+NuGet dependencies, including a font package, for local development. Generated
+binaries and restored packages are not checked into this repository. No device
+firmware or customer capture files are bundled. This document is an evolving
+inventory, not a completed runtime SBOM or binary distribution notice bundle.
+
+## Current offline workbench dependencies
+
+| Direct dependency | Pinned version | Source of this inventory |
+| --- | --- | --- |
+| Avalonia.Desktop | 12.1.1 | `src/DSView.Desktop/DSView.Desktop.csproj` and `packages.lock.json` |
+| Avalonia.Themes.Fluent | 12.1.1 | Same project and lock file |
+| Avalonia.Fonts.Inter | 12.1.1 | Same project and lock file; contains the Inter font dependency |
+| CommunityToolkit.Mvvm | 8.4.2 | Same project and lock file |
+| .NET SDK | 10.0.303, latest-patch roll-forward | `global.json`; target framework `net10.0` |
+
+Restore uses nuget.org with package source mapping. Per-project lock files
+record resolved transitive dependencies and content hashes. Package and asset
+license texts, copyright notices, native runtime assets and font provenance
+still need a complete distribution inventory before a binary release. Listing
+a dependency here does not establish distribution clearance.
+
+The UI also requests installed Cascadia Mono/Consolas fonts as system fallbacks;
+this source tree does not bundle their font files. NVT Core theme code and the
+NVT-specific parser are not included. The embedded demo JSON is project-authored
+synthetic data, not a device/customer capture; its annotations are not generated
+by a connected raw protocol decoder.
 
 ## Present references
 
@@ -37,16 +60,16 @@ Decoder metadata alone is not sufficient permission evidence.
 The planned initial decoder candidate is `1-i2c` (`1:i2c`). The `fsi`, `pxx1`,
 `st7789`, and `spi_tpm` decoders are outside the proposed runtime scope.
 They remain in the upstream source checkout. No runtime packaging allowlist
-or implementation is shipped in this bootstrap.
+or native decoder implementation is shipped in this offline workbench.
 
-## Before adding a build or binary release
+## Before a binary release
 
 - Map actual compiled files, included headers, runtime modules, and helpers to
   their source versions, copyright notices, and licenses. Resolve ambiguous files
   or omit them from the selected build and distribution.
-- Pin actual versions and packaging modes of .NET, Avalonia, native capture and
-  decoding dependencies, and all transitive packages. None are restored or
-  bundled by this bootstrap.
+- Verify the pinned .NET/Avalonia package graph and selected packaging mode.
+  Inventory native capture and decoding dependencies when they are connected;
+  the current offline build does not link the DSView native libraries.
 - Audit the actual font, icon, and firmware assets if they are added. Preserve
   their separate license texts and applicable notices.
 - Generate the final file manifest and SBOM. Prepare matching source, build

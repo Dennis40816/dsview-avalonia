@@ -16,24 +16,44 @@ public sealed class Workbench : ObservableObject
     public double End { get; private set; } = 33_500;
     public Endpoint? A { get; private set; }
     public Endpoint? B { get; private set; }
+    public LocalMeasurement? PinnedMeasurement { get; private set; }
     public int Mode { get; private set; }
     public int? Armed { get; private set; }
     public Packet? Selected { get; private set; }
     public bool Details { get; private set; }
     public bool PacketsTab { get; private set; }
-    public string Hint { get; private set; } = "Click a signal for its two surrounding edges. Ctrl + wheel to zoom; drag to pan.";
+    public string Hint { get; private set; } = "";
+    private (Endpoint? A, Endpoint? B, int Mode, LocalMeasurement? Measurement)? editOrigin;
+    private bool selectingPair;
+    private ObservationGroup? cachedGroup;
+    private Capture? cachedCapture;
+    private Signal[] cachedSignals = [];
+    private Decoder[] cachedDecoders = [];
     public string Query { get; private set; } = "";
     private readonly Stack<(double Start, double End, ObservationGroup Group)> history = new();
     public event Action? Changed;
     public Workbench() => Group = Groups[0];
-    public IReadOnlyList<Signal> Signals => Capture?.Signals.Where(s => Group.Channels.Contains(s.Id)).ToArray() ?? [];
-    public IReadOnlyList<Decoder> Decoders => DSView.Domain.Capture.Decoders.Where(d => Group.Decoders.Contains(d.Id)).ToArray();
+    private void CacheScope()
+    {
+        if (ReferenceEquals(cachedCapture, Capture) && ReferenceEquals(cachedGroup, Group)) return;
+        cachedCapture = Capture; cachedGroup = Group;
+        cachedSignals = Capture?.Signals.Where(s => Group.Channels.Contains(s.Id)).ToArray() ?? [];
+        cachedDecoders = DSView.Domain.Capture.Decoders.Where(d => Group.Decoders.Contains(d.Id)).ToArray();
+    }
+    public IReadOnlyList<Signal> Signals { get { CacheScope(); return cachedSignals; } }
+    public IReadOnlyList<Decoder> Decoders { get { CacheScope(); return cachedDecoders; } }
     public bool IsAllSignals => Group.Name == "All signals";
     public IEnumerable<Packet> Packets => (Capture?.Packets ?? []).Where(p => (IsAllSignals || Group.Decoders.Contains(p.Decoder)) && (string.IsNullOrWhiteSpace(Query) || $"{p.Id} {p.Hex} {p.Address} {p.Title} {p.Error} 0x{p.Value:X}".Contains(Query, StringComparison.OrdinalIgnoreCase)));
     public bool SelectionInGroup => Selected == null || IsAllSignals || Group.Decoders.Contains(Selected.Decoder);
     public double Us(double sample) => sample / (Capture?.SampleRate ?? 50_000_000) * 1_000_000;
     public string RangeText => $"{Us(Start):0.##}–{Us(End):0.##} µs";
-    public void Load(Capture capture) { Capture = capture; Notify(); }
+    public void Load(Capture capture)
+    {
+        if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
+        Capture = capture; A = B = null; PinnedMeasurement = null; Selected = null; Details = false;
+        editOrigin = null; selectingPair = false; Armed = null; Mode = 0; Hint = ""; history.Clear();
+        SetRange(0, capture.SampleCount);
+    }
     public void Notify() { OnPropertyChanged(string.Empty); Changed?.Invoke(); }
     public void SetGroup(ObservationGroup group) { Group = group; if (!SelectionInGroup) Details = false; Notify(); }
     public void ShowAll() { PacketsTab = false; SetGroup(Groups.First(g => g.Name == "All signals")); }
@@ -56,19 +76,26 @@ public sealed class Workbench : ObservableObject
         Remember(); Group = Groups.FirstOrDefault(g => g.Decoders.Contains(Selected.Decoder)) ?? Group;
         PacketsTab = false; var span = Selected.Span.End - Selected.Span.Start; SetRange(Selected.Span.Start - span * .08, Selected.Span.End + span * .08);
     }
-    public void SetMode(int mode) { Mode = mode; Armed = mode == 0 ? null : 0; Hint = mode == 0 ? "Click a signal for its two surrounding edges." : "Choose A on any signal, then choose B. Drag a cursor to adjust."; Notify(); }
-    public void Arm(int endpoint) { if (Mode == 0) Mode = 1; Armed = endpoint; Hint = $"Choose {(endpoint == 0 ? "A" : "B")} on any signal."; Notify(); }
-    public void Clear() { A = B = null; Armed = Mode == 0 ? null : 0; Notify(); }
+    private void BeginEdit() { editOrigin ??= (A, B, Mode, PinnedMeasurement); }
+    public void SetMode(int mode) { BeginEdit(); selectingPair = mode != 0; Mode = mode; Armed = mode == 0 ? null : 0; Hint = mode == 0 ? "" : "Choose A, then B on any signal. Esc cancels."; Notify(); }
+    public void SetSnapMode(int mode) { Mode = mode == 2 ? 2 : 1; Notify(); }
+    public void Arm(int endpoint) { BeginEdit(); selectingPair = false; if (Mode == 0) Mode = 1; Armed = endpoint; Hint = $"Choose {(endpoint == 0 ? "A" : "B")} on any signal. Esc cancels."; Notify(); }
+    public void CancelPick()
+    {
+        if (editOrigin is { } old) { A = old.A; B = old.B; Mode = old.Mode; PinnedMeasurement = old.Measurement; }
+        editOrigin = null; selectingPair = false; Armed = null; Hint = ""; Notify();
+    }
+    public void Clear() { A = B = null; PinnedMeasurement = null; editOrigin = null; selectingPair = false; Armed = null; Mode = 0; Hint = ""; Notify(); }
     public void Pick(int channel, long sample, double tolerance, int? replacing = null)
     {
         var signal = Capture?.Signals.First(s => s.Id == channel);
         if (signal == null) return;
         if (Mode == 0 && replacing == null)
         {
-            var pair = signal.Surrounding(sample);
-            if (pair == null) { Hint = $"D{channel} has fewer than two edges. Choose A/B position to measure here."; Notify(); return; }
-            A = new(channel, pair.Value.A.Sample, true); B = new(channel, pair.Value.B.Sample, true);
-            Hint = $"D{channel} · adjacent edges (B − A)."; Notify(); return;
+            var measurement = Capture!.MeasureAt(channel, sample);
+            if (measurement.Pulse is not { } pulse) { Hint = $"D{channel} · {measurement.Reason}."; Notify(); return; }
+            PinnedMeasurement = measurement; A = new(channel, pulse.Start, true); B = new(channel, pulse.End, true);
+            editOrigin = null; Hint = ""; Notify(); return;
         }
         int? target = replacing ?? Armed;
         if (target == null) { Hint = "Choose A or B to replace an endpoint, or drag an existing cursor."; Notify(); return; }
@@ -76,10 +103,12 @@ public sealed class Workbench : ObservableObject
         if (Mode != 2 && (edge == null || Math.Abs(edge.Sample - sample) > tolerance || edge.Sample < Start || edge.Sample > End))
         { Hint = "No nearby edge. Zoom in or use A/B position."; Notify(); return; }
         if (replacing != null && Mode == 0) Mode = 1;
+        PinnedMeasurement = null;
         var point = new Endpoint(channel, Mode == 2 ? Math.Clamp(sample, 0, Capture!.SampleCount - 1) : edge!.Sample, Mode != 2);
         if (target == 0) A = point; else B = point;
-        Armed = replacing != null ? null : target == 0 ? 1 : null;
-        Hint = Armed == 1 ? "A set. Choose B on any signal." : "Drag either cursor to refine; Δt = B − A.";
+        Armed = replacing == null && selectingPair && target == 0 ? 1 : null;
+        if (Armed == null) { editOrigin = null; selectingPair = false; }
+        Hint = Armed == 1 ? "A set. Choose B on any signal. Esc cancels." : "";
         Notify();
     }
     public bool EditEndpoint(int index, double microseconds)
@@ -90,7 +119,7 @@ public sealed class Workbench : ObservableObject
         if (sample == old.Sample) return true;
         var point = old with { Sample = sample, IsEdge = false };
         if (index == 0) A = point; else B = point;
-        Mode = 2; Hint = "Position quantized to the 20 ns capture sample grid."; Notify(); return true;
+        Mode = 2; PinnedMeasurement = null; Hint = $"Position · {TimingText.Duration(1d / Capture.SampleRate)} sample grid."; Notify(); return true;
     }
     public void FitMarkers()
     {

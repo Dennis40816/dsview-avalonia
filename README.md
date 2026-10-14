@@ -12,15 +12,46 @@ DSView's acquisition and decoding libraries.
 
 ## Status
 
-Repository bootstrap. **License clearance is incomplete; no binary releases yet.**
+A runnable native Avalonia **offline workbench** is available for development.
+It uses bundled synthetic waveforms and precomputed protocol records. Hardware
+acquisition, raw protocol decoding, capture-file import and analysis-session
+save/restore are not connected. **License clearance is incomplete; no binary releases yet.**
 
-This revision contains licensing and repository documentation plus a pinned
-upstream source reference. It does not contain a runnable Avalonia application,
-a native bridge, a decoder implementation, or a verified build pipeline.
+The workbench supports one signal Group at a time, all-channel navigation,
+custom waveform colors, Hex packet details, local high/low pulse width and
+complete-cycle period/frequency, and cross-channel A/B edge or position timing.
+The time ruler stays visible while scrolling channels. A local frequency is not
+a claim of a stable capture-wide clock.
 
-The planned interface puts waveforms first, with readable typography, layered
-decoder annotations, expandable packet contents, and named time measurements.
-Those are development goals, not implemented capabilities of this revision.
+## Run the offline workbench
+
+Use the .NET SDK pinned by `global.json` (10.0.303, with latest-patch roll-forward):
+
+```sh
+dotnet restore DSView2.slnx --locked-mode
+dotnet build DSView2.slnx --no-restore
+dotnet run --project src/DSView.Desktop --no-build
+```
+
+Focused numerical and state checks:
+
+```sh
+dotnet run --project tests/DSView.Checks --no-build
+```
+
+Start with a Group or All signals. Hover a pulse to preview timing; click to pin
+it. Use Measure A/B to choose two references, or choose Position for sample-grid
+locations. Escape cancels a pending selection or numeric edit. Ctrl + wheel
+zooms and dragging empty waveform space pans. Select a packet for its content;
+Locate source explicitly changes the time view. Fit time shows the whole recording.
+
+The physical probe swatch is fixed. Click the separate short line beside a
+signal name to customize its waveform color. Group/color preferences are saved
+locally; measurements and capture sessions are not yet saved.
+
+Windows native interaction has been exercised. Other desktop platforms, the
+full DPI matrix and large-recording performance still need validation. The
+synthetic fixture cannot validate actual device timing or decoder correctness.
 
 Before binary distribution, the project must resolve upstream source and notice
 gaps, determine the actual build and runtime dependencies, and produce a software
