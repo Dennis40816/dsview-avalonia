@@ -55,6 +55,12 @@ analysis state while preserving Group definitions and colors. If the active
 Group has no captured signals, loading chooses a compatible Group. See
 [offline examples and answer key](docs/OFFLINE-EXAMPLES.md).
 
+If a manually selected Group has no signals in the current capture, the waveform
+area explains the empty state and offers **Show all signals**. Edge navigation
+and new picking are disabled until signals are visible. Existing measurements
+remain available; **Fit** recovers both endpoints, or **Show all signals** restores
+the captured rows without changing the time range.
+
 **I²C from samples** appears when a local native-worker configuration is present.
 It contains only D0/SCL and D1/SDA; its packets are decoded in a background job
 from the same samples used for display and timing. The worker/runtime is not

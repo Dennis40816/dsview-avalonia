@@ -5,6 +5,7 @@
     <Style Selector="Button"><Setter Property="Padding" Value="12,6" /><Setter Property="MinHeight" Value="30" /><Setter Property="CornerRadius" Value="4" /></Style>
     <Style Selector="Button.primary"><Setter Property="Background" Value="#78D7C8" /><Setter Property="Foreground" Value="#101820" /></Style>
     <Style Selector="Button.flat"><Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" /><Setter Property="CornerRadius" Value="0" /></Style>
+    <Style Selector="Button.flat:disabled /template/ ContentPresenter#PART_ContentPresenter"><Setter Property="Background" Value="Transparent" /><Setter Property="BorderBrush" Value="Transparent" /><Setter Property="Foreground" Value="#657887" /></Style>
     <Style Selector="TextBox"><Setter Property="MinHeight" Value="30" /><Setter Property="Padding" Value="8,4" /></Style>
     <Style Selector="ComboBox"><Setter Property="MinHeight" Value="32" /><Setter Property="Padding" Value="8,4" /></Style>
     <Style Selector="ToolTip"><Setter Property="MaxWidth" Value="380" /></Style>

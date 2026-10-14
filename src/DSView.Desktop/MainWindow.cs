@@ -27,12 +27,17 @@ public sealed class MainWindow : Window
     private readonly TextBlock aSource = Text("A", true), bSource = Text("B", true);
     private readonly TextBlock packetContext = Text("", true);
     private readonly TextBlock measurementTitle = Text("", true);
+    private readonly TextBlock guide = Text("Hover to measure · Ctrl + wheel to zoom", true);
+    private readonly TextBlock waveEmptyText = Text("");
+    private readonly StackPanel waveEmpty = new() { Spacing = 12, Margin = new(24, 28), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+    private readonly Button waveEmptyAction, previousEdgeButton, nextEdgeButton;
+    private readonly List<Button> endpointPickButtons = [];
     private readonly WrapPanel endpoints = new() { Orientation = Orientation.Horizontal };
     private readonly StackPanel inspector = new() { Spacing = 14, Margin = new Thickness(16) };
     private readonly StackPanel measurement = new() { Spacing = 6, Margin = new(16, 4) };
     private readonly StackPanel measurementActions = Row();
     private readonly Grid navigation = new() { ColumnDefinitions = new("Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"), Margin = new(16, 0), Height = 38 };
-    private readonly TimelineControl overview, timeline;
+    private readonly TimelineControl overview, timeline, ruler;
     private readonly Dictionary<TextBox, string> invalidTimes = [];
     private readonly Grid workspace = new() { ColumnDefinitions = new("*,0,0") };
     private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), FontSize = 12, Background = Brushes.Transparent };
@@ -83,24 +88,35 @@ public sealed class MainWindow : Window
         Add(nav, Button("−", () => Model.Zoom(1.5), "flat", "Zoom out"), 0, 2); Add(nav, Button("+", () => Model.Zoom(1 / 1.5), "flat", "Zoom in"), 0, 3);
         range.Margin = new(14, 0); Add(nav, range, 0, 4); Add(nav, Text("Edges", true), 0, 5);
         edgeChannel.Margin = new(8, 0, 4, 0); ToolTip.SetTip(edgeChannel, "Signal for previous / next edge"); AutomationProperties.SetName(edgeChannel, "Edge navigation signal"); Add(nav, edgeChannel, 0, 6);
-        Add(nav, Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge"), 0, 7); Add(nav, Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge"), 0, 8);
-        var guide = Text("Hover to measure · Ctrl + wheel to zoom", true); guide.HorizontalAlignment = HorizontalAlignment.Right; Add(nav, guide, 0, 9); Add(page, nav, 2);
+        previousEdgeButton = Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge");
+        nextEdgeButton = Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge");
+        Add(nav, previousEdgeButton, 0, 7); Add(nav, nextEdgeButton, 0, 8);
+        guide.HorizontalAlignment = HorizontalAlignment.Right; Add(nav, guide, 0, 9); Add(page, nav, 2);
         overview = new TimelineControl(Model, true); Add(page, overview, 3);
         timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
         timeline.EditingCancelled += CancelEditing;
         timeline.KeyboardModeChanged += enabled => guide.Text = enabled ? "↑↓ signal · ←→ edge / sample · Enter select · Esc cancel" : "Hover to measure · Ctrl + wheel to zoom";
         Model.SignalFocusRequested += channel => Dispatcher.UIThread.Post(() => timeline.RevealSignal(channel), DispatcherPriority.Loaded);
-        var ruler = new TimelineControl(Model, isRuler: true) { HorizontalAlignment = HorizontalAlignment.Left };
-        ruler.EndpointRequested += index => { Model.Arm(index); timeline.FocusForPick(); };
+        ruler = new TimelineControl(Model, isRuler: true) { HorizontalAlignment = HorizontalAlignment.Left };
+        ruler.EndpointRequested += index => { if (Model.Signals.Count > 0) { Model.Arm(index); timeline.FocusForPick(); } };
         ruler.EditingCancelled += CancelEditing;
-        timeline.SizeChanged += (_, _) => ruler.Width = timeline.Bounds.Width;
+        timeline.SizeChanged += (_, _) => UpdateRulerWidth();
         var waveformGrid = new Grid { RowDefinitions = new("42,Auto,*") };
         Add(waveformGrid, ruler, 0);
         var timelineHost = new Grid(); timelineHost.Children.Add(timeline); timelineHost.Children.Add(timeline.LabelControls);
         waveScroll = new ScrollViewer { Content = timelineHost, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         waveScroll.ScrollChanged += (_, _) => timeline.SetViewport(waveScroll.Offset.Y, waveScroll.Viewport.Height);
         Add(waveformGrid, waveScroll, 2);
+        waveEmptyText.TextWrapping = TextWrapping.Wrap; waveEmptyText.MaxWidth = 420;
+        waveEmptyAction = Button("", () =>
+        {
+            if (Model.Capture?.Signals.Count > 0) { Model.ShowAll(); waveTab.Focus(); }
+            else ShowInfo();
+        }, "flat");
+        waveEmptyAction.HorizontalAlignment = HorizontalAlignment.Left;
+        waveEmpty.Children.Add(waveEmptyText); waveEmpty.Children.Add(waveEmptyAction); Add(waveformGrid, waveEmpty, 2);
         wavePanel = waveformGrid;
+        wavePanel.SizeChanged += (_, _) => UpdateRulerWidth();
         var packetGrid = new Grid { RowDefinitions = new("Auto,*") }; Add(packetGrid, search, 0); Add(packetGrid, packets, 1); packetPanel = packetGrid;
         packetEmptyText.TextWrapping = TextWrapping.Wrap; packetEmptyText.MaxWidth = 420;
         packetEmptyAction = Button("", RecoverPackets, "flat"); packetEmptyAction.HorizontalAlignment = HorizontalAlignment.Left;
@@ -124,6 +140,7 @@ public sealed class MainWindow : Window
             label.TextWrapping = TextWrapping.Wrap; label.Margin = new(0, 0, 8, 0); Add(endpoint, label, 0, 0); Add(endpoint, box, 0, 1);
             var units = Text("µs", true); units.Margin = new(8, 0, 4, 0); Add(endpoint, units, 0, 2);
             var choose = Button("Choose", () => { Model.Arm(index); timeline.FocusForPick(); }, "flat", "Replace only this endpoint");
+            endpointPickButtons.Add(choose);
             AutomationProperties.SetName(choose, $"Choose {(index == 0 ? "A" : "B")} endpoint"); AutomationProperties.SetName(box, $"{(index == 0 ? "A" : "B")} time in microseconds");
             ToolTip.SetTip(box, "Typing sets a Position on the sample grid. Enter commits; Esc cancels.");
             box.GotFocus += (_, _) => { hint.Text = "Typing sets Position · Enter commits · Esc cancels"; hint.IsVisible = true; };
@@ -143,6 +160,7 @@ public sealed class MainWindow : Window
         Refresh();
     }
     private int SelectedEdgeChannel() => edgeChannel.SelectedItem is string str && int.TryParse(str.AsSpan(1), out var id) ? id : Model.Group.Channels.FirstOrDefault();
+    private void UpdateRulerWidth() => ruler.Width = Model.Signals.Count > 0 ? timeline.Bounds.Width : wavePanel.Bounds.Width;
     private static string SourceSummary(DemoExample example, Capture capture) => $"Offline · {example.Name} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
     private async Task LoadAsync(DemoExample example)
     {
@@ -179,6 +197,15 @@ public sealed class MainWindow : Window
             if (!(edgeChannel.ItemsSource?.Cast<string>().SequenceEqual(choices) ?? false)) { edgeChannel.ItemsSource = choices; edgeChannel.SelectedItem = choices.Contains(old) ? old : choices.FirstOrDefault(); }
             wavePanel.IsVisible = !Model.PacketsTab; packetPanel.IsVisible = Model.PacketsTab;
             navigation.IsVisible = overview.IsVisible = measureButton.IsVisible = !Model.PacketsTab;
+            bool hasSignals = Model.Signals.Count > 0;
+            waveScroll.IsVisible = hasSignals; waveEmpty.IsVisible = Model.Capture != null && !hasSignals;
+            UpdateRulerWidth();
+            waveEmptyText.Text = Model.Capture?.Signals.Count == 0 ? "This capture contains no signals."
+                : "This Group has no signals in the current capture.";
+            waveEmptyAction.Content = Model.Capture?.Signals.Count > 0 ? "Show all signals" : "Choose source";
+            measureButton.IsEnabled = edgeChannel.IsEnabled = previousEdgeButton.IsEnabled = nextEdgeButton.IsEnabled = hasSignals;
+            guide.IsVisible = hasSignals;
+            foreach (var choose in endpointPickButtons) choose.IsEnabled = hasSignals;
             waveTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#9BAEBF") : TimelineControl.Ink("#78D7C8"); packetTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#78D7C8") : TimelineControl.Ink("#9BAEBF");
             if (Model.PacketsTab)
             {

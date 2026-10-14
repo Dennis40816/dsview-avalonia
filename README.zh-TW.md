@@ -46,6 +46,10 @@ transition，沒有解析封包。
 開啟範例會清除分析狀態，保留 Group 定義與線色。若目前 Group 不包含新來源的任何訊號，會改選可顯示訊號的 Group。
 詳見[離線範例與驗證數值](docs/OFFLINE-EXAMPLES.md)。
 
+手動選到沒有目前擷取訊號的 Group 時，波形區會說明原因並提供 **Show all signals**。
+沒有可見訊號時，edge 導覽與新選點操作會停用。既有量測保留；**Fit** 可找回兩個端點，
+或用 **Show all signals** 恢復已擷取通道並維持目前時間範圍。
+
 有本機 native worker 設定時，來源清單會出現 **I²C from samples**。
 它只有 D0/SCL 與 D1/SDA，背景解析與顯示、量測使用同一份原始 samples。
 Worker 與 runtime 尚未隨產品提供。設定、程序檢查與限制見[開發用解析契約](docs/NATIVE-I2C.md)。
