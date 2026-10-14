@@ -13,9 +13,11 @@ DSView's acquisition and decoding libraries.
 ## Status
 
 A runnable native Avalonia **offline workbench** is available for development.
-It uses bundled synthetic waveforms and precomputed protocol records. Hardware
-acquisition, raw protocol decoding, capture-file import and analysis-session
-save/restore are not connected. **License clearance is incomplete; no binary releases yet.**
+The default examples use bundled synthetic waveforms and precomputed protocol
+records. An optional development I²C source runs an external native decoder on
+its generated raw samples. Hardware acquisition, capture-file import and
+analysis-session save/restore are not connected.
+**License clearance is incomplete; no binary releases yet.**
 
 The workbench supports one signal Group at a time, all-channel navigation,
 custom waveform colors, Hex packet details, local high/low pulse width and
@@ -49,8 +51,16 @@ Open the capture source button in the header to choose **Board bring-up**
 Timing + gaps has changed bytes and clock timing, read termination, an address
 NACK and missing coverage. Dense signals has 32 raw channels and 1,048,576 stored
 transitions over 120 ms, without decoded packets. Opening an example clears
-analysis state while preserving Group/color preferences. See
+analysis state while preserving Group definitions and colors. If the active
+Group has no captured signals, loading chooses a compatible Group. See
 [offline examples and answer key](docs/OFFLINE-EXAMPLES.md).
+
+**I²C from samples** appears when a local native-worker configuration is present.
+It contains only D0/SCL and D1/SDA; its packets are decoded in a background job
+from the same samples used for display and timing. The worker/runtime is not
+bundled. See the [development decoder contract](docs/NATIVE-I2C.md) for setup,
+focused process checks and limits. This is a finite I²C path, not streaming or
+general decoder support.
 
 Dense waveform regions appear as activity bands. Zoom in to resolve individual
 transitions. Picking and timing use the original samples, independently of the

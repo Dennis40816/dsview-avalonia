@@ -12,14 +12,19 @@ public sealed record DemoExample(string Id, string Name, string Description)
 
 public static class DemoCaptureSource
 {
-    public static readonly IReadOnlyList<DemoExample> Examples = [
+    private static readonly IReadOnlyList<DemoExample> StandardExamples = [
         new("demo-capture", "Board bring-up", "I²C, SPI and UART with application and framing diagnostics."),
         new("timing-gaps", "Timing + gaps", "Different timing and bytes, I²C read termination, address NACK and a missing-data interval."),
         new("dense-signals", "Dense signals", "32 synthetic raw signals, 1,048,576 transitions over 120 ms. No decoded packets.")];
+    public static IReadOnlyList<DemoExample> Examples => NativeI2cSource.IsConfigured
+        ? [.. StandardExamples, new("i2c-raw", "I²C from samples", "Two generated signals. Address, Hex bytes and ACKs are decoded from these samples.")]
+        : StandardExamples;
     public static Task<Capture> LoadAsync(CancellationToken cancellation = default) => LoadAsync(Examples[0].Id, cancellation);
-    public static Task<Capture> LoadAsync(string example, CancellationToken cancellation = default) => Task.Run(() =>
+    public static Task<Capture> LoadAsync(string example, CancellationToken cancellation = default) => example == "i2c-raw"
+        ? NativeI2cSource.LoadAsync(cancellation) : LoadFixtureAsync(example, cancellation);
+    internal static Task<Capture> LoadFixtureAsync(string example, CancellationToken cancellation = default) => Task.Run(() =>
     {
-        if (!Examples.Any(e => e.Id == example)) throw new ArgumentException("Unknown offline example.", nameof(example));
+        if (example != "i2c-raw" && !StandardExamples.Any(e => e.Id == example)) throw new ArgumentException("Unknown offline example.", nameof(example));
         if (example == "dense-signals") return DenseSignals(cancellation);
         using var stream = typeof(DemoCaptureSource).Assembly.GetManifestResourceStream($"DSView.Infrastructure.Fixtures.{example}.json")!;
         using var document = JsonDocument.Parse(stream);
@@ -37,7 +42,7 @@ public static class DemoCaptureSource
             var edges = new List<Edge>();
             foreach (var e in channel.GetProperty("events").EnumerateArray())
             {
-                long sample = Sample(e.GetProperty("t"));
+                long sample = e.TryGetProperty("sample", out var exact) ? exact.GetInt64() : Sample(e.GetProperty("t"));
                 if (gaps.Any(g => g.Start <= sample && g.End > sample)) continue;
                 if (gaps.Any(g => g.Start <= sample && g.End > lastObserved)) previous = null;
                 bool high = e.GetProperty("v").GetInt32() != 0;
@@ -57,7 +62,7 @@ public static class DemoCaptureSource
             int? value = r.TryGetProperty("value", out var val) && val.ValueKind == JsonValueKind.Number ? val.GetInt32() : null;
             var diagnostics = r.TryGetProperty("diagnostics", out var ds) ? ds.EnumerateArray().Select(d => new PacketDiagnostic(
                 Text(d, "id"), Text(d, "layer"), Text(d, "code"), Text(d, "message"), d.GetProperty("spans").EnumerateArray().Select(s => new SourceSpan(Sample(s[0]), Sample(s[1]))).ToArray(), d.TryGetProperty("field", out var field) ? field.GetString() : null)).ToArray() : [];
-            I2cTransfer? wire = r.TryGetProperty("wire", out var w) ? new(Text(w, "direction") == "Read", w.GetProperty("acknowledged").EnumerateArray().Select(a => a.ValueKind == JsonValueKind.Null ? (bool?)null : a.GetBoolean()).ToArray()) : null;
+            I2cTransfer? wire = r.TryGetProperty("wire", out var w) ? new(Text(w, "direction") == "Read", w.GetProperty("acknowledged").EnumerateArray().Select(a => a.ValueKind == JsonValueKind.Null ? (bool?)null : a.GetBoolean()).ToArray()) { Completion = I2cCompletion.Stop } : null;
             var cells = wire != null && w.TryGetProperty("cells", out var cs) ? cs.EnumerateArray().Select(c => new I2cCell(Span(c.GetProperty("data")), Span(c.GetProperty("ack")))).ToArray() : [];
             packets.Add(new Packet(Text(r, "id"), Text(r, "group"), new(Sample(r.GetProperty("start")), Sample(r.GetProperty("end"))), Bytes(r, "bytes"), Text(r, "address"), Text(r, "title"), r.GetProperty("error").GetString(), value, fields) { Diagnostics = diagnostics, I2c = wire, WireCells = cells });
         }
@@ -77,7 +82,7 @@ public static class DemoCaptureSource
             }
             signals[channel] = new(channel, channel == 0 ? "CLOCK" : $"SIGNAL_{channel:00}", false, edges);
         }
-        return new(50_000_000, 6_000_000, signals, []);
+        return new(50_000_000, 6_000_000, signals, []) { SourceDescription = "Generated raw signals with no decoded packets. No hardware capture." };
     }
     private static string Text(JsonElement value, string key) => value.TryGetProperty(key, out var v) ? v.GetString() ?? "" : "";
     private static byte[] Bytes(JsonElement value, string key) => value.GetProperty(key).EnumerateArray().Select(b => b.GetByte()).ToArray();

@@ -9,14 +9,23 @@ Use the capture source button in the header to open an offline example.
 Selection in the dialog does not change the current capture. **Open example**
 replaces it and clears measurements, pending edits, packet selection, search and
 navigation history. Group definitions and waveform colors remain. Reload
-reloads the successfully opened example. These captures are synthetic; their
-annotations are precomputed and do not establish raw-decoder or hardware accuracy.
+reloads the successfully opened example. Loading selects a compatible Group
+only if the current Group contains no captured signals; definitions and colors
+remain intact. These captures are synthetic and do not establish hardware accuracy.
+The default examples use precomputed annotations or have no packets.
 
 | Example | Sampling | Purpose |
 | --- | --- | --- |
 | Board bring-up | 50 MS/s, 50,000 samples, 1 ms | Multiple protocols, packet fields and layered diagnostics |
 | Timing + gaps | 10 MS/s, 80,000 samples, 8 ms | Changed clock timing and bytes, normal read NACK, address NACK and missing coverage |
 | Dense signals | 50 MS/s, 6,000,000 samples, 120 ms | 32 raw channels with 32,768 transitions each; dense rendering and source-based timing; no decoded packets |
+| I²C from samples (configured development option) | 50 MS/s, 804 samples, 16.08 µs | Generated D0/SCL and D1/SDA, decoded by an external native worker; no fixture packet records |
+
+The optional I²C source requires the [local worker configuration](NATIVE-I2C.md).
+Configuration presence exposes the choice; opening validates its runtime paths
+and selected file identities. A failed or cancelled load retains the prior
+capture. New source selection supersedes an older loading job. The active Group
+after a successful fallback is saved with the other preferences on normal close.
 
 The header marks missing data regardless of zoom. Capture source details gives
 the exact missing interval and a **Show interval** action. That explicit
@@ -43,8 +52,10 @@ The inspector identifies a selected packet excluded by the current filters.
 ## Fixture representation
 
 The embedded JSON files declare `sampleRate` in samples/second and `sampleCount`.
-All JSON time values, including `gaps`, are in microseconds. The loader converts
-them to integer sample indices using the declared rate. Gaps are half-open.
+JSON time values, including `gaps`, are in microseconds. The loader converts
+them to integer sample indices using the declared rate. A channel event can
+instead provide an exact integer `sample`; the raw I²C example uses that form.
+Gaps are half-open.
 Channel `events` identify transitions, not arbitrary first-resumed level
 snapshots. Events inside a gap are omitted. The first explicit transition after
 a gap is retained even if its resulting level matches the last observed level

@@ -30,8 +30,9 @@ a dependency here does not establish distribution clearance.
 The UI also requests installed Cascadia Mono/Consolas fonts as system fallbacks;
 this source tree does not bundle their font files. NVT Core theme code and the
 NVT-specific parser are not included. The embedded demo JSON is project-authored
-synthetic data, not a device/customer capture; its annotations are not generated
-by a connected raw protocol decoder.
+synthetic data, not a device/customer capture. The default examples have
+precomputed annotations. The optional raw I²C example contains no annotations;
+an explicitly configured external development worker generates them at runtime.
 
 ## Present references
 
@@ -60,7 +61,17 @@ Decoder metadata alone is not sufficient permission evidence.
 The planned initial decoder candidate is `1-i2c` (`1:i2c`). The `fsi`, `pxx1`,
 `st7789`, and `spi_tpm` decoders are outside the proposed runtime scope.
 They remain in the upstream source checkout. No runtime packaging allowlist
-or native decoder implementation is shipped in this offline workbench.
+or native decoder binary is shipped in this offline workbench.
+
+The optional `NativeI2cSource` adapter invokes a separately built worker using
+`libsigrokdecode4DSL` and the pinned `1-i2c` Python decoder. A local Windows
+experiment uses a candidate runtime patch, Python 3.12.10, GLib 2.90.1,
+gettext-runtime 1.0, PCRE2 10.49, libiconv 1.19 and winpthreads with GCC 15.1.0.
+Those experimental files, binaries, runtime packages and machine configuration
+are outside this source repository. The worker and two decoder Python files
+are hash checked before execution; dependent DLLs and Python modules still
+require a complete runtime inventory. Process separation does not establish
+license clearance. See [the development boundary](docs/NATIVE-I2C.md).
 
 ## Before a binary release
 

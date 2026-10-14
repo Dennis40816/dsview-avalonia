@@ -11,8 +11,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 ## 目前狀態
 
-目前已有可執行的原生 Avalonia **離線工作區**，使用合成波形及預先產生的解析資料。
-尚未接硬體擷取、raw protocol decoder、擷取檔匯入及分析工作階段保存／還原。
+目前已有可執行的原生 Avalonia **離線工作區**，預設範例使用合成波形及預先產生的解析資料。
+選用的開發用 I²C 來源會呼叫外部 native decoder，解析其生成的原始 samples。
+尚未接硬體擷取、擷取檔匯入及分析工作階段保存／還原。
 **授權清查尚未完成，目前不提供 binary 發行。**
 
 已提供一次一個 Group、全部通道、自訂波形線色、Hex 封包內容、高／低脈寬、完整局部週期／頻率，以及跨通道 A/B edge／位置量測。
@@ -42,8 +43,13 @@ dotnet run --project tests/DSView.Checks --no-build
 或 **Dense signals**（50 MS/s）。Timing + gaps 有不同資料與時鐘速度、讀取結束、
 位址 NACK 及缺資料區間。Dense signals 有 32 路原始訊號，120 ms 內共 1,048,576 個
 transition，沒有解析封包。
-開啟範例會清除分析狀態，保留 Group／線色偏好。
+開啟範例會清除分析狀態，保留 Group 定義與線色。若目前 Group 不包含新來源的任何訊號，會改選可顯示訊號的 Group。
 詳見[離線範例與驗證數值](docs/OFFLINE-EXAMPLES.md)。
+
+有本機 native worker 設定時，來源清單會出現 **I²C from samples**。
+它只有 D0/SCL 與 D1/SDA，背景解析與顯示、量測使用同一份原始 samples。
+Worker 與 runtime 尚未隨產品提供。設定、程序檢查與限制見[開發用解析契約](docs/NATIVE-I2C.md)。
+目前僅支援有限長度的連續 I²C，不代表已支援串流或全部解析器。
 
 密集波形先顯示活動帶，放大後可看見個別 transition。
 選點與量測始終使用原始 sample，不受顯示細節影響。

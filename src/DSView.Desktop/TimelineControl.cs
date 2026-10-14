@@ -198,8 +198,9 @@ public sealed class TimelineControl : Control
             using (context.PushClip(new Rect(LabelWidth, y, PlotWidth, 38)))
             foreach (var packet in model.Capture.Packets.Where(p => p.Decoder == decoder.Id && p.Span.End >= model.Start && p.Span.Start <= model.End))
             {
-                bool detailed = packet.WireCells.Any(cell => (cell.Data.End - cell.Data.Start) / (model.End - model.Start) * PlotWidth >= 43);
-                var items = detailed ? model.Capture.ProtocolItems(packet) : [new ProtocolItem(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
+                var protocol = model.Capture.ProtocolItems(packet);
+                bool detailed = (packet.Annotations != null || packet.WireCells.Count > 0) && protocol.Any(item => item.Kind == "data" && (item.Span.End - item.Span.Start) / (model.End - model.Start) * PlotWidth >= 43);
+                var items = detailed ? protocol : [new ProtocolItem(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
                 foreach (var item in items)
                 {
                     if (item.Span.End < model.Start || item.Span.Start > model.End) continue;
@@ -208,7 +209,8 @@ public sealed class TimelineControl : Control
                     if (item.Kind == "point")
                     {
                         context.DrawLine(new Pen(Muted, 1), new(left, y + 3), new(left, y + 32));
-                        Label(context, item.Label == "START" ? "S" : "P", Math.Clamp(left + 2, LabelWidth, LabelWidth + PlotWidth - 11), y + 10, Muted, 11);
+                        string pointLabel = item.Label switch { "START" => "S", "RESTART" or "START REPEAT" => "Sr", "STOP" => "P", _ => item.Label };
+                        Label(context, pointLabel, Math.Clamp(left + 2, LabelWidth, LabelWidth + PlotWidth - 18), y + 10, Muted, 11);
                         hits.Add((new(left - 5, y, 14, 36), packet)); continue;
                     }
                     IBrush fill = item.Kind == "ack" ? Ink("#25303A") : Ink(model.Selected == packet ? "#245A53" : "#254347");

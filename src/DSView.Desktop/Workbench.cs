@@ -44,7 +44,7 @@ public sealed class Workbench : ObservableObject
         if (ReferenceEquals(cachedCapture, Capture) && ReferenceEquals(cachedGroup, Group)) return;
         cachedCapture = Capture; cachedGroup = Group;
         cachedSignals = Capture?.Signals.Where(s => Group.Channels.Contains(s.Id)).ToArray() ?? [];
-        cachedDecoders = DSView.Domain.Capture.Decoders.Where(d => Group.Decoders.Contains(d.Id)).ToArray();
+        cachedDecoders = DSView.Domain.Capture.Decoders.Where(d => Group.Decoders.Contains(d.Id) && d.Channels.All(id => cachedSignals.Any(s => s.Id == id))).ToArray();
     }
     public IReadOnlyList<Signal> Signals { get { CacheScope(); return cachedSignals; } }
     public IReadOnlyList<Decoder> Decoders { get { CacheScope(); return cachedDecoders; } }
@@ -71,6 +71,8 @@ public sealed class Workbench : ObservableObject
     {
         if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
         Capture = capture; A = B = Probe = null; PinnedMeasurement = null; Selected = null; SelectedIssue = null; Issues = capture.Issues; Details = false;
+        if (!capture.Signals.Any(s => Group.Channels.Contains(s.Id)))
+            Group = Groups.FirstOrDefault(g => capture.Signals.Any(s => g.Channels.Contains(s.Id))) ?? Groups.Last();
         editOrigin = null; selectingPair = draggingEndpoint = false; Armed = null; Mode = 0; Hint = ""; Query = ""; PacketsTab = false; history.Clear();
         SetRange(0, capture.SampleCount);
     }
@@ -200,7 +202,7 @@ public sealed class Workbench : ObservableObject
     }
     public void Pick(int channel, long sample, double tolerance, int? replacing = null)
     {
-        var signal = Capture?.Signals.First(s => s.Id == channel);
+        var signal = Capture?.Signals.FirstOrDefault(s => s.Id == channel);
         if (signal == null) return;
         if (Mode == 0 && replacing == null)
         {
@@ -251,7 +253,7 @@ public sealed class Workbench : ObservableObject
     }
     public void StepEdge(int channel, int direction)
     {
-        var signal = Capture?.Signals.First(s => s.Id == channel); if (signal == null) return;
+        var signal = Capture?.Signals.FirstOrDefault(s => s.Id == channel); if (signal == null) return;
         var center = (Start + End) / 2;
         Edge? edge = direction > 0 ? Capture!.ObservedEdgeAtOrAfter(signal, (long)Math.Floor(center) + 1) : Capture!.ObservedEdgeBefore(signal, (long)Math.Ceiling(center));
         if (edge == null) { Hint = "No further edge in this capture."; Notify(); return; }

@@ -175,7 +175,7 @@ public sealed class MainWindow : Window
             issuesButton.Content = $"Capture issues · {Model.Issues.Count}"; issuesButton.IsVisible = Model.Issues.Count > 0;
             range.Text = Model.RangeText;
             if (search.Text != Model.Query) search.Text = Model.Query;
-            var old = edgeChannel.SelectedItem as string; var choices = Model.Group.Channels.Select(c => $"D{c}").ToArray();
+            var old = edgeChannel.SelectedItem as string; var choices = Model.Signals.Select(c => $"D{c.Id}").ToArray();
             if (!(edgeChannel.ItemsSource?.Cast<string>().SequenceEqual(choices) ?? false)) { edgeChannel.ItemsSource = choices; edgeChannel.SelectedItem = choices.Contains(old) ? old : choices.FirstOrDefault(); }
             wavePanel.IsVisible = !Model.PacketsTab; packetPanel.IsVisible = Model.PacketsTab;
             navigation.IsVisible = overview.IsVisible = measureButton.IsVisible = !Model.PacketsTab;
@@ -281,7 +281,7 @@ public sealed class MainWindow : Window
         var title = Text(packet.Title); title.FontSize = 15; title.FontWeight = FontWeight.SemiBold; title.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(title);
         inspector.Children.Add(Text(TimeAxis.FormatRange(packet.Span.Start, packet.Span.End, Model.Capture!.SampleRate), true));
         packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
-        inspector.Children.Add(Text(packet.Address + (packet.I2c is { } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
+        inspector.Children.Add(Text(packet.Address + (packet.I2c is { AddressObserved: true } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
         if (packet.Bytes.Length > 0)
         {
             inspector.Children.Add(Text("Data bytes · Hex", true));
@@ -402,7 +402,7 @@ public sealed class MainWindow : Window
         var body = new StackPanel { Margin = new(22), Spacing = 14 };
         body.Children.Add(Text("Current capture · " + activeExample.Name));
         body.Children.Add(Text($"{capture.Signals.Count} channels · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}"));
-        body.Children.Add(new TextBlock { Text = "Synthetic waveforms and precomputed annotations. Hardware acquisition and raw protocol decoding are not connected.", TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
+        body.Children.Add(new TextBlock { Text = capture.SourceDescription, TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
         if (capture.Gaps.Count == 0) body.Children.Add(Text("Coverage · no missing intervals", true));
         foreach (var gap in capture.Gaps)
         {

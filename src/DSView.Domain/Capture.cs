@@ -36,7 +36,13 @@ public sealed record LocalMeasurement(int Channel, bool High, SourceSpan? Pulse,
 public sealed record PacketField(string Name, byte[] Raw, IReadOnlyList<SourceSpan> Spans);
 public sealed record PacketDiagnostic(string Id, string Layer, string Code, string Message, IReadOnlyList<SourceSpan> Spans, string? Field = null);
 public sealed record CaptureIssue(Packet Packet, PacketDiagnostic Diagnostic);
-public sealed record I2cTransfer(bool Read, IReadOnlyList<bool?> Acknowledged);
+public enum I2cCompletion { Unknown, Stop, RepeatedStart, CaptureEnded }
+public sealed record I2cTransfer(bool Read, IReadOnlyList<bool?> Acknowledged)
+{
+    public bool AddressObserved { get; init; } = true;
+    public I2cCompletion Completion { get; init; }
+}
+public sealed record ProtocolAnnotation(string Label, SourceSpan Span, string Kind);
 public sealed record I2cCell(SourceSpan Data, SourceSpan Acknowledge);
 public sealed record SignalActivity(int Edges, bool Complete, bool? ConstantLevel);
 public sealed record Packet(string Id, string Decoder, SourceSpan Span, byte[] Bytes, string Address,
@@ -45,7 +51,9 @@ public sealed record Packet(string Id, string Decoder, SourceSpan Span, byte[] B
     public IReadOnlyList<PacketDiagnostic> Diagnostics { get; init; } = [];
     public I2cTransfer? I2c { get; init; }
     public IReadOnlyList<I2cCell> WireCells { get; init; } = [];
-    public string Direction => I2c == null ? "?" : I2c.Read ? "R" : "W";
+    // Non-null means explicit observed protocol events; never synthesize boundaries.
+    public IReadOnlyList<ProtocolAnnotation>? Annotations { get; init; }
+    public string Direction => I2c is not { AddressObserved: true } ? "?" : I2c.Read ? "R" : "W";
     public string Hex => string.Join(" ", Bytes.Select(b => b.ToString("X2")));
     public override string ToString() => $"{Id} · {Decoder.ToUpperInvariant()} · {Hex} · {Error ?? Title}";
 }
@@ -58,6 +66,7 @@ public sealed record ObservationGroup(string Name, int[] Channels, string[] Deco
 public sealed record Endpoint(int Channel, long Sample, bool IsEdge);
 public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Signal> Signals, IReadOnlyList<Packet> Packets)
 {
+    public string SourceDescription { get; init; } = "Synthetic waveforms with precomputed protocol annotations. This example does not run a raw decoder. No hardware capture.";
     // Half-open intervals where samples are absent. Silence alone is not a gap.
     public IReadOnlyList<SourceSpan> Gaps { get; init; } = [];
     public bool HasSample(long sample) => sample >= 0 && sample < SampleCount && !Gaps.Any(g => g.Start <= sample && g.End > sample);
@@ -163,6 +172,8 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
     public static readonly Decoder[] Decoders = [new("i2c", "I²C", [0, 1]), new("spi", "SPI", [2, 3, 4, 5]), new("ua", "UART TX", [6]), new("ub", "UART RX", [7])];
     public IReadOnlyList<ProtocolItem> ProtocolItems(Packet packet)
     {
+        if (packet.Annotations is { } observed)
+            return observed.Select(item => new ProtocolItem(packet, item.Label, item.Span, item.Kind)).ToArray();
         if (packet.Decoder != "i2c" || packet.WireCells.Count != packet.Bytes.Length + 1)
             return [new(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
         // Explicit synthetic annotations, not a live protocol decoder. Never infer bit time from sample rate.
