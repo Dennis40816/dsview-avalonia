@@ -39,6 +39,21 @@ internal static class RawDecodeChecks
         check(model.Groups.SequenceEqual(savedGroups) && model.Colors[0] == "#FFFF00", "Source fallback preserves Group definitions and colors without appending Groups");
         var narrow = new ObservationGroup("SCL only", [0], []); model.Groups.Insert(0, narrow); model.SetGroup(narrow); model.Load(raw);
         check(ReferenceEquals(model.Group, narrow) && model.Signals.Single().Id == 0, "Source loading retains a compatible narrow Group");
+        model.Pick(0, 36, 0); model.FitMarkers();
+        check(model.A?.Sample == 32 && model.B?.Sample == 40 && model.Start == 27 && model.End == 45 && model.PinnedMeasurement?.PeriodSamples == 12,
+            "Fit exposes a short pulse and its adjacent cycle without a fixed 125-sample margin");
+        model.Previous();
+        check(model.Start == 0 && model.End == raw.SampleCount && model.A?.Sample == 32 && model.B?.Sample == 40,
+            "Returning from measurement fit restores the viewport without losing the selected pulse");
+        model.EditEndpointTime(0, .8m); model.EditEndpointTime(1, .64m); model.FitMarkers();
+        check(model.Start == 27 && model.End == 45 && model.A?.Sample == 40 && model.B?.Sample == 32,
+            "Reversing endpoint order keeps the same fitted view and preserves signed endpoint identity");
+        model.EditEndpointTime(0, 0); model.EditEndpointTime(1, 0); model.FitMarkers();
+        check(model.Start == 0 && model.End == 10 && model.A?.Sample == 0 && model.B?.Sample == 0,
+            "Coincident boundary markers retain a navigable sample-scale fitted view");
+        model.EditEndpointTime(0, 16.04m); model.EditEndpointTime(1, 16.06m); model.FitMarkers();
+        check(model.Start == 793 && model.End == 804 && model.A?.Sample == 802 && model.B?.Sample == 803,
+            "Fitting the final two samples clamps the view while retaining both source positions");
         var complete = I2cEventAdapter.Apply(raw, Json(raw, false, E("START", 16, 16), E("ADDRESS READ", 28, 124, 0x51),
             E("ACK", 124, 136), E("DATA READ", 136, 232, 0x96), E("NACK", 232, 244), E("STOP", 248, 248)));
         var read = complete.Packets.Single();

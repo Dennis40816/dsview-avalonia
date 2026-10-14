@@ -199,7 +199,8 @@ public sealed class TimelineControl : Control
             foreach (var packet in model.Capture.Packets.Where(p => p.Decoder == decoder.Id && p.Span.End >= model.Start && p.Span.Start <= model.End))
             {
                 var protocol = model.Capture.ProtocolItems(packet);
-                bool detailed = (packet.Annotations != null || packet.WireCells.Count > 0) && protocol.Any(item => item.Kind == "data" && (item.Span.End - item.Span.Start) / (model.End - model.Start) * PlotWidth >= 43);
+                bool pointsOnly = packet.Annotations != null && protocol.All(item => item.Kind == "point");
+                bool detailed = pointsOnly || (packet.Annotations != null || packet.WireCells.Count > 0) && protocol.Any(item => item.Kind == "data" && (item.Span.End - item.Span.Start) / (model.End - model.Start) * PlotWidth >= 43);
                 var items = detailed ? protocol : [new ProtocolItem(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
                 foreach (var item in items)
                 {

@@ -248,7 +248,7 @@ public sealed class Workbench : ObservableObject
     {
         if (A == null || B == null) return;
         Remember(); Group = Groups.FirstOrDefault(g => g.Channels.Contains(A.Channel) && g.Channels.Contains(B.Channel)) ?? Groups[^1];
-        var first = Math.Min(A.Sample, B.Sample); var last = Math.Max(A.Sample, B.Sample); var pad = Math.Max(125, (last - first) * .15);
+        var first = Math.Min(A.Sample, B.Sample); var last = Math.Max(A.Sample, B.Sample); var pad = Math.Max(5, (last - first) * .15);
         PacketsTab = false; SetRange(first - pad, last + pad);
     }
     public void StepEdge(int channel, int direction)

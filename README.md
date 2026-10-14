@@ -85,6 +85,8 @@ through observed edges (one sample in Position mode), and Enter selects the
 endpoint. Outside a pending selection, Enter pins the local pulse at the keyboard
 cursor. A and B have separate ruler handles even at the same time. Numeric edits
 set a Position; invalid input leaves the committed measurement intact.
+Fit frames the selected interval closely, including short pulses. Previous view
+restores the earlier viewport without clearing the measurement.
 
 Show in the Activity panel reveals a channel without changing the time range.
 Explicit source/issue navigation can create a source Group if custom Groups no
@@ -97,8 +99,10 @@ locally; measurements and capture sessions are not yet saved.
 Windows native interaction has been exercised. Other desktop platforms, the
 full DPI matrix and large-recording performance still need validation. The
 synthetic fixture cannot validate actual device timing or decoder correctness.
-The current adaptive ruler and packet empty states have focused numerical/state
-checks; their native layout and keyboard recovery still need verification.
+Native ns/µs/ms views, short-pulse fitting, cross-channel keyboard selection,
+numeric cancellation and empty-search recovery have been exercised. Large-offset
+labels, the other empty-state variants and the full keyboard/DPI matrix still
+need native verification. These checks are not an independent usability trial.
 
 Before binary distribution, the project must resolve upstream source and notice
 gaps, determine the actual build and runtime dependencies, and produce a software
