@@ -17,6 +17,7 @@ public sealed class Workbench : ObservableObject
     public Endpoint? A { get; private set; }
     public Endpoint? B { get; private set; }
     public LocalMeasurement? PinnedMeasurement { get; private set; }
+    public Endpoint? Probe { get; private set; }
     public int Mode { get; private set; }
     public int? Armed { get; private set; }
     public Packet? Selected { get; private set; }
@@ -28,6 +29,7 @@ public sealed class Workbench : ObservableObject
     public string Hint { get; private set; } = "";
     private (Endpoint? A, Endpoint? B, int Mode, LocalMeasurement? Measurement)? editOrigin;
     private bool selectingPair;
+    private bool draggingEndpoint;
     private ObservationGroup? cachedGroup;
     private Capture? cachedCapture;
     private Signal[] cachedSignals = [];
@@ -53,12 +55,12 @@ public sealed class Workbench : ObservableObject
     public void Load(Capture capture)
     {
         if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
-        Capture = capture; A = B = null; PinnedMeasurement = null; Selected = null; SelectedIssue = null; Issues = capture.Issues; Details = false;
-        editOrigin = null; selectingPair = false; Armed = null; Mode = 0; Hint = ""; Query = ""; PacketsTab = false; history.Clear();
+        Capture = capture; A = B = Probe = null; PinnedMeasurement = null; Selected = null; SelectedIssue = null; Issues = capture.Issues; Details = false;
+        editOrigin = null; selectingPair = draggingEndpoint = false; Armed = null; Mode = 0; Hint = ""; Query = ""; PacketsTab = false; history.Clear();
         SetRange(0, capture.SampleCount);
     }
     public void Notify() { OnPropertyChanged(string.Empty); Changed?.Invoke(); }
-    public void SetGroup(ObservationGroup group) { Group = group; if (!SelectionInGroup) Details = false; Notify(); }
+    public void SetGroup(ObservationGroup group) { Group = group; if (Probe != null && !group.Channels.Contains(Probe.Channel)) Probe = null; if (!SelectionInGroup) Details = false; Notify(); }
     public void ShowAll() { PacketsTab = false; SetGroup(Groups.First(g => g.Name == "All signals")); }
     public void Select(Packet packet) { Selected = packet; SelectedIssue = null; Details = true; Notify(); }
     public void ShowSignal(int channel)
@@ -116,15 +118,70 @@ public sealed class Workbench : ObservableObject
         var source = new ObservationGroup(name, decoder.Channels, [decoderId]); Groups.Insert(Math.Max(0, Groups.Count - 1), source); return source;
     }
     private void BeginEdit() { editOrigin ??= (A, B, Mode, PinnedMeasurement); }
-    public void SetMode(int mode) { BeginEdit(); selectingPair = mode != 0; Mode = mode; Armed = mode == 0 ? null : 0; Hint = mode == 0 ? "" : "Choose A, then B on any signal. Esc cancels."; Notify(); }
-    public void SetSnapMode(int mode) { Mode = mode == 2 ? 2 : 1; Notify(); }
+    public void SetMode(int mode) { BeginEdit(); selectingPair = mode != 0; Mode = mode; if (Mode == 2 && Probe != null) Probe = Probe with { IsEdge = false }; Armed = mode == 0 ? null : 0; Hint = mode == 0 ? "" : "Choose A, then B on any signal. Esc cancels."; Notify(); }
+    public void SetSnapMode(int mode) { Mode = mode == 2 ? 2 : 1; if (Probe != null) PlaceProbe(Capture!.Signals.First(s => s.Id == Probe.Channel), Probe.Sample); Notify(); }
     public void Arm(int endpoint) { BeginEdit(); selectingPair = false; if (Mode == 0) Mode = 1; Armed = endpoint; Hint = $"Choose {(endpoint == 0 ? "A" : "B")} on any signal. Esc cancels."; Notify(); }
     public void CancelPick()
     {
         if (editOrigin is { } old) { A = old.A; B = old.B; Mode = old.Mode; PinnedMeasurement = old.Measurement; }
-        editOrigin = null; selectingPair = false; Armed = null; Hint = ""; Notify();
+        editOrigin = null; selectingPair = draggingEndpoint = false; Armed = null; Hint = ""; Notify();
     }
-    public void Clear() { A = B = null; PinnedMeasurement = null; editOrigin = null; selectingPair = false; Armed = null; Mode = 0; Hint = ""; Notify(); }
+    public void Clear() { A = B = null; PinnedMeasurement = null; editOrigin = null; selectingPair = draggingEndpoint = false; Armed = null; Mode = 0; Hint = ""; Notify(); }
+    public void BeginDrag() { BeginEdit(); draggingEndpoint = true; }
+    public void FinishDrag() { editOrigin = null; selectingPair = draggingEndpoint = false; Armed = null; Hint = ""; Notify(); }
+    public void MeasurementError(string message) { Hint = message; Notify(); }
+    public void ClearMeasurementError(string message) { if (Hint == message) { Hint = ""; Notify(); } }
+    public void FocusProbe()
+    {
+        if (Capture == null || Signals.Count == 0) { Probe = null; return; }
+        if (Probe is { } existing && Signals.Any(s => s.Id == existing.Channel) && existing.Sample >= Start && existing.Sample <= End) return;
+        PlaceProbe(Signals[0], (long)Math.Round((Start + End) / 2)); Notify();
+    }
+    private void PlaceProbe(Signal signal, long sample)
+    {
+        if (Mode == 2) { Probe = new(signal.Id, Math.Clamp(sample, 0, Capture!.SampleCount - 1), false); return; }
+        var edge = Capture!.NearestObservedEdge(signal, sample);
+        Probe = edge != null && edge.Sample >= Start && edge.Sample <= End
+            ? new(signal.Id, edge.Sample, true)
+            : new(signal.Id, Math.Clamp(sample, 0, Capture.SampleCount - 1), false);
+    }
+    public void MoveProbe(int channelDirection, int timeDirection)
+    {
+        FocusProbe(); if (Probe == null || Capture == null) return;
+        if (channelDirection != 0)
+        {
+            int index = Signals.ToList().FindIndex(s => s.Id == Probe.Channel);
+            PlaceProbe(Signals[Math.Clamp(index + channelDirection, 0, Signals.Count - 1)], Probe.Sample);
+        }
+        else if (timeDirection != 0)
+        {
+            if (Mode == 2) Probe = Probe with { Sample = Math.Clamp(Probe.Sample + Math.Sign(timeDirection), 0, Capture.SampleCount - 1), IsEdge = false };
+            else
+            {
+                var signal = Signals.First(s => s.Id == Probe.Channel);
+                var edge = timeDirection > 0 ? signal.Edges.FirstOrDefault(e => e.Sample > Probe.Sample && Capture.HasSample(e.Sample)) : signal.Edges.LastOrDefault(e => e.Sample < Probe.Sample && Capture.HasSample(e.Sample));
+                if (edge == null) { Hint = "No further observed edge on this signal."; Notify(); return; }
+                Probe = new(signal.Id, edge.Sample, true);
+            }
+            if (Probe.Sample < Start || Probe.Sample > End)
+            {
+                Remember(); var half = (End - Start) / 2; SetRange(Probe.Sample - half, Probe.Sample + half);
+            }
+        }
+        Hint = ""; Notify(); SignalFocusRequested?.Invoke(Probe.Channel);
+    }
+    public void CommitProbe()
+    {
+        FocusProbe(); if (Probe is not { } probe) return;
+        if (Armed != null) Pick(probe.Channel, probe.Sample, 0);
+        else
+        {
+            var local = Capture!.MeasureAt(probe.Channel, probe.Sample);
+            if (local.Pulse is not { } pulse) { MeasurementError($"D{probe.Channel} · {local.Reason}."); return; }
+            A = new(probe.Channel, pulse.Start, true); B = new(probe.Channel, pulse.End, true); PinnedMeasurement = local;
+            Mode = 0; editOrigin = null; selectingPair = draggingEndpoint = false; Hint = ""; Notify();
+        }
+    }
     public void Pick(int channel, long sample, double tolerance, int? replacing = null)
     {
         var signal = Capture?.Signals.First(s => s.Id == channel);
@@ -146,16 +203,18 @@ public sealed class Workbench : ObservableObject
         var point = new Endpoint(channel, Mode == 2 ? Math.Clamp(sample, 0, Capture!.SampleCount - 1) : edge!.Sample, Mode != 2);
         if (target == 0) A = point; else B = point;
         Armed = replacing == null && selectingPair && target == 0 ? 1 : null;
-        if (Armed == null) { editOrigin = null; selectingPair = false; }
+        if (Armed == null && !draggingEndpoint) { editOrigin = null; selectingPair = false; }
         Hint = Armed == 1 ? "A set. Choose B on any signal. Esc cancels." : "";
         Notify();
     }
     public bool EditEndpoint(int index, double microseconds)
     {
         var old = index == 0 ? A : B;
-        if (old == null || Capture == null || !double.IsFinite(microseconds) || microseconds < 0 || microseconds > Us(Capture.SampleCount - 1)) return false;
+        if (old == null || Capture == null) return false;
+        if (!double.IsFinite(microseconds) || microseconds < 0 || microseconds > Us(Capture.SampleCount - 1)) { MeasurementError($"Enter a time from 0 to {Us(Capture.SampleCount - 1):0.###} µs."); return false; }
         var sample = Capture.ToSample(microseconds);
         if (sample == old.Sample) return true;
+        editOrigin = null; selectingPair = draggingEndpoint = false; Armed = null;
         var point = old with { Sample = sample, IsEdge = false };
         if (index == 0) A = point; else B = point;
         Mode = 2; PinnedMeasurement = null; Hint = $"Position · {TimingText.Duration(1d / Capture.SampleRate)} sample grid."; Notify(); return true;
@@ -171,7 +230,7 @@ public sealed class Workbench : ObservableObject
     {
         var signal = Capture?.Signals.First(s => s.Id == channel); if (signal == null) return;
         var center = (Start + End) / 2;
-        Edge? edge = direction > 0 ? signal.Edges.FirstOrDefault(e => e.Sample > center + 1 && Capture!.HasSample(e.Sample)) : signal.Edges.LastOrDefault(e => e.Sample < center - 1 && Capture!.HasSample(e.Sample));
+        Edge? edge = direction > 0 ? signal.Edges.FirstOrDefault(e => e.Sample > center && Capture!.HasSample(e.Sample)) : signal.Edges.LastOrDefault(e => e.Sample < center && Capture!.HasSample(e.Sample));
         if (edge == null) { Hint = "No further edge in this capture."; Notify(); return; }
         Remember(); var span = End - Start; SetRange(edge.Sample - span / 2, edge.Sample + span / 2);
     }

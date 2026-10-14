@@ -56,6 +56,12 @@ locations. Escape cancels a pending selection or numeric edit. Ctrl + wheel
 zooms and dragging empty waveform space pans. Select a packet for its content;
 Locate source explicitly changes the time view. Fit time shows the whole recording.
 
+Measure A/B focuses the waveform: Up/Down chooses a signal, Left/Right steps
+through observed edges (one sample in Position mode), and Enter selects the
+endpoint. Outside a pending selection, Enter pins the local pulse at the keyboard
+cursor. A and B have separate ruler handles even at the same time. Numeric edits
+set a Position; invalid input leaves the committed measurement intact.
+
 Show in the Activity panel reveals a channel without changing the time range.
 Explicit source/issue navigation can create a source Group if custom Groups no
 longer contain the decoder's required channels.

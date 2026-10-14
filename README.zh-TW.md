@@ -48,6 +48,10 @@ Measure A/B 依序選兩個參考點；Position 可量指定的取樣位置。
 Esc 取消選點或尚未提交的數值修改。Ctrl＋滾輪縮放，拖曳波形空白處平移。
 選封包可看內容，Locate source 才會移動時間視野；Fit time 顯示完整時間範圍。
 
+Measure A/B 會將焦點移到波形：上下鍵換訊號、左右鍵逐個 observed edge 移動
+（Position 模式每次一個 sample），Enter 選點。未在選點時，Enter 固定游標處的局部脈衝量測。
+A/B 在同一時間仍有分開的時間尺把手。輸入數字會設定 Position；錯誤輸入會保留已提交的量測。
+
 Activity 的 Show 顯示指定通道，不改時間範圍。
 若自訂 Group 已不包含解析器所需通道，明確定位來源／異常時會建立來源 Group。
 

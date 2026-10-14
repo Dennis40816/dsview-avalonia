@@ -21,6 +21,12 @@ public sealed class TimelineControl : Control
     private double pressStart, pressEnd;
     private bool down, dragged;
     private int? dragEndpoint;
+    private int? armedOnPress;
+    private MarkerHandle? pressedHandle;
+    private Capture? pressCapture;
+    private long dragSampleOrigin;
+    private IPointer? activePointer;
+    private bool keyboardMode;
     private int? hoverChannel;
     private long hoverSample;
     private IReadOnlyList<Signal>? colorSignals;
@@ -31,6 +37,9 @@ public sealed class TimelineControl : Control
     private readonly List<(Rect Bounds, CaptureIssue Issue)> issueHits = [];
     public Canvas LabelControls { get; } = new() { Width = LabelWidth, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
     public event Action<int>? ColorRequested;
+    public event Action<int>? EndpointRequested;
+    public event Action? EditingCancelled;
+    public event Action<bool>? KeyboardModeChanged;
     private static readonly string[] Probe = ["#505050", "#8F5202", "#CC0000", "#F57900", "#EDD400", "#73D216", "#3465A4", "#75507B"];
     public static IBrush Ink(string hex) => Brush.Parse(hex);
     private static readonly IBrush Text = Ink("#E4EAF0"), Muted = Ink("#9BAEBF"), Accent = Ink("#78D7C8"), Surface = Ink("#101820"), GridInk = Ink("#26343F");
@@ -42,11 +51,33 @@ public sealed class TimelineControl : Control
         model.Changed += Refresh;
         Refresh();
         PointerPressed += Pressed; PointerMoved += Moved; PointerReleased += Released;
-        PointerCaptureLost += (_, _) => { down = false; dragEndpoint = null; };
+        PointerCaptureLost += (_, _) => { if (down && dragged && dragEndpoint != null) model.CancelPick(); down = false; dragEndpoint = null; activePointer = null; };
+        KeyDown += Keyboard;
+        GotFocus += (_, e) => { if (!overview && !rulerOnly && e.NavigationMethod == NavigationMethod.Tab) { model.FocusProbe(); SetKeyboardMode(true); } };
+        LostFocus += (_, _) => SetKeyboardMode(false);
         PointerExited += (_, _) => { if (!down) { hoverChannel = null; InvalidateVisual(); } };
         PointerWheelChanged += (_, e) => { if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) { model.Zoom(e.Delta.Y > 0 ? .8 : 1.25, Math.Clamp((e.GetPosition(this).X - LabelWidth) / PlotWidth, 0, 1)); e.Handled = true; } };
     }
     private double PlotWidth => Math.Max(1, Bounds.Width - LabelWidth - 16);
+    private IReadOnlyList<MarkerHandle> Handles => MarkerHandles.Layout(model.A is { } a ? X(a.Sample) : null, model.B is { } b ? X(b.Sample) : null, LabelWidth, LabelWidth + PlotWidth);
+    private void SetKeyboardMode(bool enabled) { keyboardMode = enabled; KeyboardModeChanged?.Invoke(enabled); Refresh(); }
+    public void FocusForPick() { Focus(); model.FocusProbe(); SetKeyboardMode(true); }
+    private void Keyboard(object? sender, KeyEventArgs e)
+    {
+        if (overview || !IsFocused || e.KeyModifiers != KeyModifiers.None) return;
+        if (e.Key == Key.Escape)
+        {
+            if (!down && model.Armed == null && !keyboardMode) return;
+            down = false; dragEndpoint = null; activePointer?.Capture(null); activePointer = null;
+            if (EditingCancelled != null) EditingCancelled(); else model.CancelPick();
+            SetKeyboardMode(false); e.Handled = true; return;
+        }
+        if (rulerOnly || e.Key is not (Key.Left or Key.Right or Key.Up or Key.Down or Key.Enter)) return;
+        SetKeyboardMode(true);
+        if (e.Key == Key.Enter) model.CommitProbe();
+        else model.MoveProbe(e.Key == Key.Up ? -1 : e.Key == Key.Down ? 1 : 0, e.Key == Key.Left ? -1 : e.Key == Key.Right ? 1 : 0);
+        e.Handled = true;
+    }
     private double SignalsTop => model.Decoders.Count * 42 + 28;
     private double X(double sample) => LabelWidth + (sample - model.Start) / (model.End - model.Start) * PlotWidth;
     private long Sample(double x) => (long)Math.Round(model.Start + (x - LabelWidth) / PlotWidth * (model.End - model.Start));
@@ -58,6 +89,10 @@ public sealed class TimelineControl : Control
     private void Refresh()
     {
         if (!down) hoverChannel = null;
+        if (!overview && !rulerOnly)
+            AutomationProperties.SetName(this, model.Probe is { } probe && keyboardMode
+                ? $"Waveforms · D{probe.Channel} · {model.Us(probe.Sample):0.###} µs · {(probe.IsEdge ? "edge" : "position")}. Arrow keys move; Enter selects; Escape cancels."
+                : "Waveforms. Arrow keys select a signal and edge; Enter measures.");
         Height = overview ? 40 : rulerOnly ? 42 : Math.Max(288, SignalsTop + model.Signals.Count * RowHeight + 16);
         if (!overview && !rulerOnly) RefreshColorButtons();
         InvalidateVisual();
@@ -235,20 +270,31 @@ public sealed class TimelineControl : Control
             }
         }
         DrawMarker(context, model.A, "A", false); DrawMarker(context, model.B, "B", true);
-        if (hoverChannel is int hc && model.Armed == null && !down && model.Signals.Any(s => s.Id == hc))
+        var probe = keyboardMode && IsFocused ? model.Probe : null;
+        if (probe != null && model.Signals.Any(s => s.Id == probe.Channel))
         {
-            var measured = model.Capture.MeasureAt(hc, hoverSample);
+            var row = SignalsTop + model.Signals.ToList().FindIndex(s => s.Id == probe.Channel) * RowHeight;
+            context.DrawRectangle(null, new Pen(Accent, 1, DashStyle.Dash), new(LabelWidth, row + 1, PlotWidth, RowHeight - 2));
+            context.DrawLine(new Pen(Accent, 1, DashStyle.Dash), new(X(probe.Sample), row), new(X(probe.Sample), row + RowHeight));
+        }
+        int? previewChannel = probe?.Channel ?? hoverChannel;
+        long previewSample = probe?.Sample ?? hoverSample;
+        if (previewChannel is int hc && (model.Armed == null || probe != null) && !down && model.Signals.Any(s => s.Id == hc))
+        {
+            var measured = model.Capture.MeasureAt(hc, previewSample);
             var y = SignalsTop + model.Signals.ToList().FindIndex(s => s.Id == hc) * RowHeight + 3;
-            double labelX = Math.Clamp(X(hoverSample), LabelWidth, Math.Max(LabelWidth, Bounds.Width - 430));
+            double labelX = Math.Clamp(X(previewSample), LabelWidth, Math.Max(LabelWidth, Bounds.Width - 430));
             if (measured.Pulse is { } pulse)
             {
                 double x1 = Math.Clamp(X(pulse.Start), LabelWidth, LabelWidth + PlotWidth), x2 = Math.Clamp(X(pulse.End), LabelWidth, LabelWidth + PlotWidth);
                 context.DrawLine(new Pen(Accent, 1), new(x1, y), new(x2, y));
             }
-            if (measured != model.PinnedMeasurement)
+            if (measured != model.PinnedMeasurement || (probe != null && model.Armed != null))
             {
-                var preview = Format($"Preview D{hc} · " + TimingText.Local(measured, model.Capture.SampleRate), Ink("#C9F1EA"), 13);
-                labelX = Math.Clamp(X(hoverSample), LabelWidth, Math.Max(LabelWidth, LabelWidth + PlotWidth - preview.Width - 8));
+                var value = probe != null && model.Armed != null
+                    ? $"D{hc} · {model.Us(previewSample):0.###} µs · {(probe.IsEdge ? "edge" : "position")} · Enter selects {(model.Armed == 0 ? "A" : "B")}" : $"Preview D{hc} · " + TimingText.Local(measured, model.Capture.SampleRate);
+                var preview = Format(value, Ink("#C9F1EA"), 13);
+                labelX = Math.Clamp(X(previewSample), LabelWidth, Math.Max(LabelWidth, LabelWidth + PlotWidth - preview.Width - 8));
                 // Keep the preview between the previous low line (rowTop - 17) and current high line (rowTop + 16).
                 context.FillRectangle(Surface, new(labelX, y - 16, preview.Width + 8, 22));
                 context.DrawText(preview, new(labelX + 4, y - 15));
@@ -261,12 +307,11 @@ public sealed class TimelineControl : Control
         var x = X(marker.Sample);
         context.DrawLine(new Pen(Accent, 1, dashed ? DashStyle.Dash : null), new(x, rulerOnly ? 35 : 0), new(x, Height));
         if (!rulerOnly) return;
-        var other = name == "A" ? model.B : model.A;
-        bool close = other != null && Math.Abs(X(other.Sample) - x) < 20;
-        if (close && name == "B") return;
-        double tagWidth = close ? 30 : 18, tagX = Math.Clamp(x - tagWidth / 2, LabelWidth, LabelWidth + PlotWidth - tagWidth);
-        context.FillRectangle(Ink("#183D3A"), new(tagX, 28, tagWidth, 17));
-        Label(context, close ? "A/B" : name, tagX + 4, 29, Accent, 11);
+        var handle = Handles.FirstOrDefault(h => h.Endpoint == (name == "A" ? 0 : 1));
+        if (handle == null) return;
+        context.DrawLine(new Pen(Accent, 1), new(handle.Bounds.Center.X, 40), new(x, 42));
+        context.FillRectangle(Ink("#183D3A"), handle.Bounds);
+        Label(context, name, handle.Bounds.X + 7, 25, Accent, 11);
     }
     private void DrawOverview(DrawingContext context)
     {
@@ -300,15 +345,17 @@ public sealed class TimelineControl : Control
     private void Pressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || model.Capture == null) return;
-        Focus(); var p = e.GetPosition(this);
+        Focus(); SetKeyboardMode(false); var p = e.GetPosition(this);
         if (overview) { if (p.X < LabelWidth || p.X > LabelWidth + PlotWidth) return; model.Remember(); var center = Math.Clamp((p.X - LabelWidth) / PlotWidth, 0, 1) * model.Capture.SampleCount; var half = (model.End - model.Start) / 2; model.SetRange(center - half, center + half); e.Handled = true; return; }
         if (p.X < LabelWidth) return;
         if (p.X > LabelWidth + PlotWidth) return;
-        press = p; pressStart = model.Start; pressEnd = model.End; down = true; dragged = false;
+        press = p; pressStart = model.Start; pressEnd = model.End; pressCapture = model.Capture; down = true; dragged = false; armedOnPress = model.Armed;
+        pressedHandle = rulerOnly ? Handles.FirstOrDefault(h => h.Bounds.Contains(p)) : null;
         double distanceA = model.A is { } a ? Math.Abs(X(a.Sample) - p.X) : double.PositiveInfinity;
         double distanceB = model.B is { } b ? Math.Abs(X(b.Sample) - p.X) : double.PositiveInfinity;
-        dragEndpoint = Math.Min(distanceA, distanceB) > 7 ? null : Math.Abs(distanceA - distanceB) < .01 ? model.Armed ?? 0 : distanceA < distanceB ? 0 : 1;
-        e.Pointer.Capture(this); e.Handled = true;
+        dragEndpoint = armedOnPress != null ? null : pressedHandle?.Endpoint ?? (Math.Min(distanceA, distanceB) > 7 ? null : Math.Abs(distanceA - distanceB) < .01 ? null : distanceA < distanceB ? 0 : 1);
+        dragSampleOrigin = (dragEndpoint == 0 ? model.A : model.B)?.Sample ?? 0;
+        activePointer = e.Pointer; e.Pointer.Capture(this); e.Handled = true;
     }
     private void Moved(object? sender, PointerEventArgs e)
     {
@@ -320,20 +367,31 @@ public sealed class TimelineControl : Control
             ToolTip.SetTip(this, issue != null ? $"{issue.Diagnostic.Layer} · {issue.Diagnostic.Message}. Click to inspect; use Locate issue for its evidence." : labelChannel is int id && p.X < 134 ? $"D{id} · {model.Signals.First(s => s.Id == id).Name} · Physical probe identity" : null);
         }
         if (!down) { InvalidateVisual(); return; }
-        if (!dragged && Math.Abs(p.X - press.X) > 4) { dragged = true; if (dragEndpoint == null) model.Remember(); }
+        if (!ReferenceEquals(pressCapture, model.Capture)) { down = false; e.Pointer.Capture(null); return; }
+        if (armedOnPress != null) { InvalidateVisual(); return; }
+        if (!dragged && Math.Abs(p.X - press.X) > 4) { dragged = true; if (dragEndpoint == null) model.Remember(); else model.BeginDrag(); }
         if (!dragged) return;
         if (dragEndpoint is int target)
         {
             var previous = target == 0 ? model.A : model.B; var channel = ChannelAt(p.Y) ?? previous?.Channel;
-            if (channel is int id) model.Pick(id, Sample(p.X), (model.End - model.Start) / PlotWidth * 8, target);
+            long sample = (long)Math.Round(dragSampleOrigin + (p.X - press.X) / PlotWidth * (pressEnd - pressStart));
+            if (channel is int id && p.X >= LabelWidth && p.X <= LabelWidth + PlotWidth) model.Pick(id, sample, (model.End - model.Start) / PlotWidth * 8, target);
         }
         else { var delta = (p.X - press.X) / PlotWidth * (pressEnd - pressStart); model.SetRange(pressStart - delta, pressEnd - delta); }
     }
     private void Released(object? sender, PointerReleasedEventArgs e)
     {
         if (!down) return;
-        down = false; var p = e.GetPosition(this); e.Pointer.Capture(null);
-        if (!dragged)
+        down = false; var p = e.GetPosition(this); var finishedDrag = dragEndpoint; e.Pointer.Capture(null);
+        if (!ReferenceEquals(pressCapture, model.Capture)) { dragEndpoint = null; return; }
+        if (armedOnPress != null)
+        {
+            if (model.Armed == armedOnPress && p.X >= LabelWidth && p.X <= LabelWidth + PlotWidth && ChannelAt(p.Y) is int chosen)
+                model.Pick(chosen, Sample(p.X), (model.End - model.Start) / PlotWidth * 8);
+        }
+        else if (dragged && finishedDrag != null) model.FinishDrag();
+        else if (!dragged && pressedHandle != null) EndpointRequested?.Invoke(pressedHandle.Endpoint);
+        else if (!dragged)
         {
             var issue = issueHits.FirstOrDefault(h => h.Bounds.Contains(p)).Issue;
             var hit = hits.FirstOrDefault(h => h.Bounds.Contains(p));

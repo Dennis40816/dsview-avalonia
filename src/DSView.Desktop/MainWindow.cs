@@ -32,7 +32,8 @@ public sealed class MainWindow : Window
     private readonly StackPanel measurement = new() { Spacing = 6, Margin = new(16, 4) };
     private readonly StackPanel measurementActions = Row();
     private readonly Grid navigation = new() { ColumnDefinitions = new("Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"), Margin = new(16, 0), Height = 38 };
-    private readonly TimelineControl overview;
+    private readonly TimelineControl overview, timeline;
+    private readonly Dictionary<TextBox, string> invalidTimes = [];
     private readonly Grid workspace = new() { ColumnDefinitions = new("*,0,0") };
     private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), FontSize = 12, Background = Brushes.Transparent };
     private readonly TextBox search = new() { PlaceholderText = "Search packets, Hex or fields", Margin = new(14, 8) };
@@ -72,7 +73,7 @@ public sealed class MainWindow : Window
         Add(groupBar, Button("All signals", Model.ShowAll, "flat"), 0, 3);
         activityButton = Button("Activity", ShowActivity, "flat", "All captured channels: full-capture activity compared with the current time view"); activityButton.HorizontalAlignment = HorizontalAlignment.Left; Add(groupBar, activityButton, 0, 4);
         detailButton = Button("Packet details", Model.ToggleDetails, "flat"); Add(groupBar, detailButton, 0, 5);
-        measureButton = Button("Measure A/B", () => Model.SetMode(1), "flat", "Choose two edges or positions, on any channels"); Add(groupBar, measureButton, 0, 6); Add(page, Band(groupBar), 1);
+        measureButton = Button("Measure A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Choose two edges or positions, on any channels"); Add(groupBar, measureButton, 0, 6); Add(page, Band(groupBar), 1);
         var nav = navigation;
         Add(nav, Button("←", Model.Previous, "flat", "Previous view"), 0, 0); Add(nav, Button("Fit time", Model.FitTime, "flat"), 0, 1);
         Add(nav, Button("−", () => Model.Zoom(1.5), "flat", "Zoom out"), 0, 2); Add(nav, Button("+", () => Model.Zoom(1 / 1.5), "flat", "Zoom in"), 0, 3);
@@ -81,9 +82,13 @@ public sealed class MainWindow : Window
         Add(nav, Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge"), 0, 7); Add(nav, Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge"), 0, 8);
         var guide = Text("Hover to measure · Ctrl + wheel to zoom", true); guide.HorizontalAlignment = HorizontalAlignment.Right; Add(nav, guide, 0, 9); Add(page, nav, 2);
         overview = new TimelineControl(Model, true); Add(page, overview, 3);
-        var timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
+        timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
+        timeline.EditingCancelled += CancelEditing;
+        timeline.KeyboardModeChanged += enabled => guide.Text = enabled ? "↑↓ signal · ←→ edge / sample · Enter select · Esc cancel" : "Hover to measure · Ctrl + wheel to zoom";
         Model.SignalFocusRequested += channel => Dispatcher.UIThread.Post(() => timeline.RevealSignal(channel), DispatcherPriority.Loaded);
         var ruler = new TimelineControl(Model, isRuler: true) { HorizontalAlignment = HorizontalAlignment.Left };
+        ruler.EndpointRequested += index => { Model.Arm(index); timeline.FocusForPick(); };
+        ruler.EditingCancelled += CancelEditing;
         timeline.SizeChanged += (_, _) => ruler.Width = timeline.Bounds.Width;
         var waveformGrid = new Grid { RowDefinitions = new("42,Auto,*") };
         Add(waveformGrid, ruler, 0);
@@ -107,10 +112,14 @@ public sealed class MainWindow : Window
         modePicker.SelectionChanged += (_, _) => { if (!updating) Model.SetSnapMode(modePicker.SelectedIndex == 1 ? 2 : 1); };
         foreach (var (label, box, index) in new[] { (aSource, aTime, 0), (bSource, bTime, 1) })
         {
-            var endpoint = Row(); endpoint.Margin = new(0, 0, 22, 0); endpoint.Children.Add(label); endpoint.Children.Add(box); endpoint.Children.Add(Text("µs", true));
-            var choose = Button("Choose", () => Model.Arm(index), "flat", "Replace only this endpoint");
+            var endpoint = new Grid { ColumnDefinitions = new("100,95,Auto,Auto"), Width = 308, Margin = new(0, 0, 16, 0) };
+            label.TextWrapping = TextWrapping.Wrap; label.Margin = new(0, 0, 8, 0); Add(endpoint, label, 0, 0); Add(endpoint, box, 0, 1);
+            var units = Text("µs", true); units.Margin = new(8, 0, 4, 0); Add(endpoint, units, 0, 2);
+            var choose = Button("Choose", () => { Model.Arm(index); timeline.FocusForPick(); }, "flat", "Replace only this endpoint");
             AutomationProperties.SetName(choose, $"Choose {(index == 0 ? "A" : "B")} endpoint"); AutomationProperties.SetName(box, $"{(index == 0 ? "A" : "B")} time in microseconds");
-            endpoint.Children.Add(choose); endpoints.Children.Add(endpoint);
+            ToolTip.SetTip(box, "Typing sets a Position on the sample grid. Enter commits; Esc cancels.");
+            box.GotFocus += (_, _) => { hint.Text = "Typing sets Position · Enter commits · Esc cancels"; hint.IsVisible = true; };
+            Add(endpoint, choose, 0, 3); endpoints.Children.Add(endpoint);
         }
         aTime.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitTime(0, aTime); }; bTime.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitTime(1, bTime); };
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
@@ -137,7 +146,7 @@ public sealed class MainWindow : Window
             var capture = await DemoCaptureSource.LoadAsync(example.Id, loadCancellation.Token);
             if (current == generation)
             {
-                renderedPacket = null; renderedIssue = null;
+                renderedPacket = null; renderedIssue = null; ResetNumericErrors();
                 Model.Load(capture); activeExample = example; waveScroll.Offset = default;
                 status.Text = SourceSummary(example, capture); ToolTip.SetTip(status, null);
             }
@@ -163,7 +172,8 @@ public sealed class MainWindow : Window
             navigation.IsVisible = overview.IsVisible = measureButton.IsVisible = !Model.PacketsTab;
             waveTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#9BAEBF") : TimelineControl.Ink("#78D7C8"); packetTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#78D7C8") : TimelineControl.Ink("#9BAEBF");
             if (Model.PacketsTab) { var values = Model.Packets.ToArray(); if (!(packets.ItemsSource?.Cast<Packet>().SequenceEqual(values) ?? false)) packets.ItemsSource = values; packets.SelectedItem = Model.Selected; }
-            modePicker.SelectedIndex = Model.Mode == 2 ? 1 : 0; hint.Text = Model.Hint; hint.IsVisible = !string.IsNullOrEmpty(Model.Hint);
+            if ((Model.A == null && Model.B == null) || (Model.Mode == 0 && Model.PinnedMeasurement != null && Model.Armed == null)) ResetNumericErrors();
+            modePicker.SelectedIndex = Model.Mode == 2 ? 1 : 0; hint.Text = invalidTimes.Values.FirstOrDefault(value => value.Length > 0) ?? Model.Hint; hint.IsVisible = !string.IsNullOrEmpty(hint.Text);
             bool hasMarkers = Model.A != null || Model.B != null;
             measurement.IsVisible = !Model.PacketsTab && (hasMarkers || Model.Armed != null || hint.IsVisible);
             endpoints.IsVisible = Model.Mode != 0 && (hasMarkers || Model.Armed != null);
@@ -171,8 +181,8 @@ public sealed class MainWindow : Window
             measurementActions.Children[1].IsVisible = Model.Armed != null;
             measurementActions.Children[2].IsVisible = Model.Armed == null && Model.A != null && Model.B != null;
             measurementActions.Children[3].IsVisible = hasMarkers || hint.IsVisible;
-            if (!aTime.IsFocused) aTime.Text = Model.A == null ? "" : Model.Us(Model.A.Sample).ToString("0.###", CultureInfo.InvariantCulture);
-            if (!bTime.IsFocused) bTime.Text = Model.B == null ? "" : Model.Us(Model.B.Sample).ToString("0.###", CultureInfo.InvariantCulture);
+            if (!aTime.IsFocused && !invalidTimes.ContainsKey(aTime)) aTime.Text = Model.A == null ? "" : Model.Us(Model.A.Sample).ToString("0.###", CultureInfo.InvariantCulture);
+            if (!bTime.IsFocused && !invalidTimes.ContainsKey(bTime)) bTime.Text = Model.B == null ? "" : Model.Us(Model.B.Sample).ToString("0.###", CultureInfo.InvariantCulture);
             aTime.IsEnabled = Model.A != null; bTime.IsEnabled = Model.B != null;
             aSource.Text = EndpointLabel(Model.A, "A"); bSource.Text = EndpointLabel(Model.B, "B");
             string localSource = Model.PinnedMeasurement is { } pinned ? $"D{pinned.Channel} {Model.Capture?.Signals.FirstOrDefault(s => s.Id == pinned.Channel)?.Name}" : "A/B";
@@ -197,16 +207,30 @@ public sealed class MainWindow : Window
     {
         if (endpoint == null) return name;
         var edge = endpoint.IsEdge ? Model.Capture?.Signals.First(s => s.Id == endpoint.Channel).Nearest(endpoint.Sample) : null;
-        return $"{name} · D{endpoint.Channel} {(edge == null ? "position" : edge.High ? "↑" : "↓")}" + (Model.Capture?.HasSample(endpoint.Sample) == false ? " (missing samples)" : "") + (Model.Group.Channels.Contains(endpoint.Channel) ? "" : " (hidden)");
+        return $"{name} · D{endpoint.Channel} {(edge == null ? "position" : edge.High ? "↑" : "↓")}" + (Model.Capture?.HasSample(endpoint.Sample) == false ? "\nMissing samples" : "") + (Model.Group.Channels.Contains(endpoint.Channel) ? "" : "\nHidden signal") + (endpoint.Sample < Model.Start || endpoint.Sample > Model.End ? "\nOutside view" : "");
     }
     private void CommitTime(int index, TextBox box)
     {
         if (updating || !box.IsEnabled) return;
-        if (double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)) Model.EditEndpoint(index, value);
+        invalidTimes.TryGetValue(box, out var priorError);
+        invalidTimes[box] = "";
+        bool parsed = double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value);
+        if (!parsed || !Model.EditEndpoint(index, value))
+        {
+            box.BorderBrush = TimelineControl.Ink("#FF9AAA");
+            invalidTimes[box] = parsed ? Model.Hint : "Enter a numeric time in µs. Esc restores the current endpoint.";
+            Model.MeasurementError(invalidTimes[box]);
+            return;
+        }
+        invalidTimes.Remove(box); box.ClearValue(BorderBrushProperty);
+        if (!string.IsNullOrEmpty(priorError)) Model.ClearMeasurementError(priorError);
         var point = index == 0 ? Model.A : Model.B; box.Text = point == null ? "" : Model.Us(point.Sample).ToString("0.###", CultureInfo.InvariantCulture);
+        Refresh();
     }
+    private void ResetNumericErrors() { invalidTimes.Clear(); aTime.ClearValue(BorderBrushProperty); bTime.ClearValue(BorderBrushProperty); }
     private void CancelEditing()
     {
+        ResetNumericErrors();
         Model.CancelPick();
         aTime.Text = Model.A == null ? "" : Model.Us(Model.A.Sample).ToString("0.###", CultureInfo.InvariantCulture);
         bTime.Text = Model.B == null ? "" : Model.Us(Model.B.Sample).ToString("0.###", CultureInfo.InvariantCulture);
@@ -242,7 +266,7 @@ public sealed class MainWindow : Window
         {
             var diagnostic = new StackPanel { Spacing = 6 };
             diagnostic.Children.Add(new TextBlock { Text = issue.Diagnostic.Layer + " · " + issue.Diagnostic.Message, TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#FF9AAA") });
-            diagnostic.Children.Add(Text(issue.Diagnostic.Field is { } field ? $"Evidence · {field}" : "Evidence · annotated packet", true));
+            diagnostic.Children.Add(Text(issue.Diagnostic.Field is { } field ? $"Evidence · {field}" : "Evidence · annotated interval", true));
             diagnostic.Children.Add(Button("Locate issue", () => Model.LocateIssue(issue), "flat", "Locate the diagnostic evidence, preserving timing markers"));
             inspector.Children.Add(new Border { Child = diagnostic, Padding = new(12), Background = TimelineControl.Ink("#40232D"), BorderBrush = TimelineControl.Ink("#FF9AAA"), BorderThickness = new(ReferenceEquals(Model.SelectedIssue, issue) ? 1 : 0) });
         }
@@ -279,7 +303,7 @@ public sealed class MainWindow : Window
             var row = new StackPanel { Spacing = 5 };
             var label = Text(issue.Diagnostic.Layer + " · " + issue.Diagnostic.Message); label.TextWrapping = TextWrapping.Wrap; row.Children.Add(label);
             var span = issue.Diagnostic.Spans.FirstOrDefault() ?? issue.Packet.Span;
-            row.Children.Add(Text($"{issue.Packet.Id} · {Model.Us(span.Start):0.##}–{Model.Us(span.End):0.##} µs · " + (issue.Diagnostic.Field ?? "packet evidence"), true));
+            row.Children.Add(Text($"{issue.Packet.Id} · {Model.Us(span.Start):0.##}–{Model.Us(span.End):0.##} µs · " + (issue.Diagnostic.Field ?? "annotated interval"), true));
             var locate = Button("Locate issue", () => Model.LocateIssue(issue), "flat"); AutomationProperties.SetName(locate, $"Locate issue {issue.Diagnostic.Layer} {issue.Diagnostic.Message}"); row.Children.Add(locate); rows.Children.Add(row);
         }
         body.Children.Add(new ScrollViewer { Content = rows, MaxHeight = 360 }); openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(issuesButton);
