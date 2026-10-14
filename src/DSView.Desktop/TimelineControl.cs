@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Globalization;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
@@ -22,6 +23,9 @@ public sealed class TimelineControl : Control
     private int? dragEndpoint;
     private int? hoverChannel;
     private long hoverSample;
+    private IReadOnlyList<Signal>? colorSignals;
+    private readonly Dictionary<int, (Button Button, Border Swatch)> colorButtons = [];
+    public Canvas LabelControls { get; } = new() { Width = LabelWidth, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
     public event Action<int>? ColorRequested;
     private static readonly string[] Probe = ["#505050", "#8F5202", "#CC0000", "#F57900", "#EDD400", "#73D216", "#3465A4", "#75507B"];
     public static IBrush Ink(string hex) => Brush.Parse(hex);
@@ -47,7 +51,38 @@ public sealed class TimelineControl : Control
         int index = (int)Math.Floor((y - SignalsTop) / RowHeight);
         return !rulerOnly && index >= 0 && index < model.Signals.Count ? model.Signals[index].Id : null;
     }
-    private void Refresh() { if (!down) hoverChannel = null; Height = overview ? 40 : rulerOnly ? 42 : Math.Max(288, SignalsTop + model.Signals.Count * RowHeight + 16); InvalidateVisual(); }
+    private void Refresh()
+    {
+        if (!down) hoverChannel = null;
+        Height = overview ? 40 : rulerOnly ? 42 : Math.Max(288, SignalsTop + model.Signals.Count * RowHeight + 16);
+        if (!overview && !rulerOnly) RefreshColorButtons();
+        InvalidateVisual();
+    }
+    private IBrush SignalColor(int channel) => Ink(model.Colors.GetValueOrDefault(channel, channel == 0 ? "#D4AD00" : "#C7D2DB"));
+    private void RefreshColorButtons()
+    {
+        if (!ReferenceEquals(colorSignals, model.Signals))
+        {
+            colorSignals = model.Signals; LabelControls.Children.Clear(); colorButtons.Clear();
+            foreach (var signal in colorSignals)
+            {
+                int channel = signal.Id;
+                var swatch = new Border { Width = 12, Height = 4, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+                var content = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 3 };
+                content.Children.Add(swatch); content.Children.Add(new TextBlock { Text = "▾", FontSize = 9, Foreground = Muted });
+                var button = new Button { Content = content, Width = 30, Height = 28, MinHeight = 28, Padding = new Thickness(3), Background = Ink("#18242E"), BorderBrush = GridInk, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(3) };
+                AutomationProperties.SetName(button, $"D{channel} {signal.Name} waveform color");
+                ToolTip.SetTip(button, $"Waveform color · D{channel} {signal.Name}");
+                button.Click += (_, _) => ColorRequested?.Invoke(channel);
+                Canvas.SetLeft(button, 134); LabelControls.Children.Add(button); colorButtons[channel] = (button, swatch);
+            }
+        }
+        for (int index = 0; index < model.Signals.Count; index++)
+        {
+            var item = colorButtons[model.Signals[index].Id]; item.Swatch.Background = SignalColor(model.Signals[index].Id);
+            Canvas.SetTop(item.Button, SignalsTop + index * RowHeight + 12);
+        }
+    }
     public override void Render(DrawingContext context)
     {
         context.FillRectangle(Surface, Bounds.WithX(0).WithY(0));
@@ -103,10 +138,12 @@ public sealed class TimelineControl : Control
                     }
                     string label = item.Label;
                     if (item.Kind == "ack" && width < 32) label = "A";
-                    var ft = Format(label, item.Kind == "ack" ? Muted : Accent, 11.5, true);
+                    var ft = Format(label, item.Kind == "ack" ? Muted : Ink("#C9F1EA"), item.Kind == "ack" ? 12 : 13, true);
+                    if (ft.Width > width - 6 && detailed && item.Kind == "data" && label.StartsWith("0x", StringComparison.Ordinal))
+                        ft = Format(label[2..], Ink("#C9F1EA"), 13, true);
                     if (ft.Width > width - 6 && !detailed && item.Kind == "data")
-                        ft = Format(packet.Decoder == "i2c" ? packet.Address + " W" : $"{packet.Bytes.Length} B", Accent, 11.5, true);
-                    if (ft.Width <= width - 6) context.DrawText(ft, new(left + (width - ft.Width) / 2, y + 10));
+                        ft = Format(packet.Decoder == "i2c" ? packet.Address + " W" : $"{packet.Bytes.Length} B", Ink("#C9F1EA"), 13, true);
+                    if (ft.Width <= width - 6) context.DrawText(ft, new(left + (width - ft.Width) / 2, y + 5 + (26 - ft.Height) / 2));
                     hits.Add((rect, packet));
                 }
             }
@@ -123,9 +160,8 @@ public sealed class TimelineControl : Control
             var y = SignalsTop + index * RowHeight;
             context.FillRectangle(Ink(Probe[signal.Id % 8]), new(15, y + 16, 5, 20));
             Label(context, $"D{signal.Id}", 26, y + 18, Muted, 12);
-            using (context.PushClip(new Rect(57, y, 80, RowHeight))) Label(context, signal.Name, 57, y + 17, Text, 12);
-            IBrush color = Ink(model.Colors.GetValueOrDefault(signal.Id, signal.Id == 0 ? "#D4AD00" : "#C7D2DB"));
-            context.DrawLine(new Pen(color, 2), new(142, y + 26), new(158, y + 26));
+            using (context.PushClip(new Rect(57, y, 73, RowHeight))) Label(context, signal.Name, 57, y + 17, Text, 13);
+            IBrush color = SignalColor(signal.Id);
             using (context.PushClip(new Rect(LabelWidth, y, PlotWidth, RowHeight)))
             {
                 var edgeIndex = signal.LowerBound((long)Math.Ceiling(model.Start));
@@ -156,9 +192,13 @@ public sealed class TimelineControl : Control
                 double x1 = Math.Clamp(X(pulse.Start), LabelWidth, LabelWidth + PlotWidth), x2 = Math.Clamp(X(pulse.End), LabelWidth, LabelWidth + PlotWidth);
                 context.DrawLine(new Pen(Accent, 1), new(x1, y), new(x2, y));
             }
-            var preview = Format("Preview · " + TimingText.Local(measured, model.Capture.SampleRate), Accent, 11);
-            context.FillRectangle(Surface, new(labelX, y - 15, preview.Width + 10, 17));
-            context.DrawText(preview, new(labelX + 4, y - 14));
+            if (measured != model.PinnedMeasurement)
+            {
+                var preview = Format($"Preview D{hc} · " + TimingText.Local(measured, model.Capture.SampleRate), Ink("#C9F1EA"), 13);
+                labelX = Math.Clamp(X(hoverSample), LabelWidth, Math.Max(LabelWidth, LabelWidth + PlotWidth - preview.Width - 8));
+                context.FillRectangle(Surface, new(labelX, y - 20, preview.Width + 8, 22));
+                context.DrawText(preview, new(labelX + 4, y - 19));
+            }
         }
     }
     private void DrawMarker(DrawingContext context, Endpoint? marker, string name, bool dashed)
@@ -196,7 +236,7 @@ public sealed class TimelineControl : Control
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || model.Capture == null) return;
         Focus(); var p = e.GetPosition(this);
         if (overview) { model.Remember(); var center = Math.Clamp((p.X - LabelWidth) / PlotWidth, 0, 1) * model.Capture.SampleCount; var half = (model.End - model.Start) / 2; model.SetRange(center - half, center + half); e.Handled = true; return; }
-        if (p.X < LabelWidth) { if (p.X >= 135 && ChannelAt(p.Y) is int c) ColorRequested?.Invoke(c); return; }
+        if (p.X < LabelWidth) return;
         if (p.X > LabelWidth + PlotWidth) return;
         press = p; pressStart = model.Start; pressEnd = model.End; down = true; dragged = false;
         double distanceA = model.A is { } a ? Math.Abs(X(a.Sample) - p.X) : double.PositiveInfinity;
@@ -210,7 +250,7 @@ public sealed class TimelineControl : Control
         if (!overview && !rulerOnly)
         {
             var labelChannel = p.X < LabelWidth ? ChannelAt(p.Y) : null;
-            ToolTip.SetTip(this, labelChannel is int id ? $"D{id} · {model.Signals.First(s => s.Id == id).Name}" + (p.X >= 135 ? " · Click to change waveform color" : " · Physical probe identity") : null);
+            ToolTip.SetTip(this, labelChannel is int id && p.X < 134 ? $"D{id} · {model.Signals.First(s => s.Id == id).Name} · Physical probe identity" : null);
         }
         if (!down) { InvalidateVisual(); return; }
         if (!dragged && Math.Abs(p.X - press.X) > 4) { dragged = true; if (dragEndpoint == null) model.Remember(); }

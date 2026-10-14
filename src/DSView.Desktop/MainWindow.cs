@@ -3,6 +3,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Avalonia;
+using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
@@ -23,11 +24,12 @@ public sealed class MainWindow : Window
     private readonly TextBox aTime = new() { Width = 95 }, bTime = new() { Width = 95 };
     private readonly TextBlock aSource = Text("A", true), bSource = Text("B", true);
     private readonly TextBlock packetContext = Text("", true);
+    private readonly TextBlock measurementTitle = Text("", true);
     private readonly WrapPanel endpoints = new() { Orientation = Orientation.Horizontal };
     private readonly StackPanel inspector = new() { Spacing = 14, Margin = new Thickness(16) };
-    private readonly StackPanel measurement = new() { Spacing = 8, Margin = new(16, 8) };
+    private readonly StackPanel measurement = new() { Spacing = 6, Margin = new(16, 4) };
     private readonly StackPanel measurementActions = Row();
-    private readonly Grid navigation = new() { ColumnDefinitions = new("Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"), Margin = new(16, 0), Height = 38 };
+    private readonly Grid navigation = new() { ColumnDefinitions = new("Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"), Margin = new(16, 0), Height = 38 };
     private readonly TimelineControl overview;
     private readonly Grid workspace = new() { ColumnDefinitions = new("*,0,0") };
     private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), FontSize = 12, Background = Brushes.Transparent };
@@ -46,7 +48,8 @@ public sealed class MainWindow : Window
         Title = "DSView2 · Offline demo"; Width = 1380; Height = 850; MinWidth = 1024; MinHeight = 650;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         RestorePreferences();
-        var page = new Grid { RowDefinitions = new("44,44,Auto,Auto,*,Auto") };
+        workspace.ColumnDefinitions[0].MinWidth = 640;
+        var page = new Grid { RowDefinitions = new("44,44,Auto,Auto,*") };
         var header = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,*,Auto"), Margin = new(16, 0) };
         var brand = Text("DSView2"); brand.FontWeight = FontWeight.SemiBold; brand.Margin = new(0, 0, 20, 0);
         Add(header, brand, 0, 0);
@@ -65,16 +68,18 @@ public sealed class MainWindow : Window
         var nav = navigation;
         Add(nav, Button("←", Model.Previous, "flat", "Previous view"), 0, 0); Add(nav, Button("Fit time", Model.FitTime, "flat"), 0, 1);
         Add(nav, Button("−", () => Model.Zoom(1.5), "flat", "Zoom out"), 0, 2); Add(nav, Button("+", () => Model.Zoom(1 / 1.5), "flat", "Zoom in"), 0, 3);
-        range.Margin = new(14, 0); Add(nav, range, 0, 4); edgeChannel.Margin = new(14, 0, 4, 0); ToolTip.SetTip(edgeChannel, "Signal for previous / next edge"); Add(nav, edgeChannel, 0, 5);
-        Add(nav, Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge"), 0, 6); Add(nav, Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge"), 0, 7);
-        var guide = Text("Hover to measure · Ctrl + wheel to zoom", true); guide.HorizontalAlignment = HorizontalAlignment.Right; Add(nav, guide, 0, 8); Add(page, nav, 2);
+        range.Margin = new(14, 0); Add(nav, range, 0, 4); Add(nav, Text("Edges", true), 0, 5);
+        edgeChannel.Margin = new(8, 0, 4, 0); ToolTip.SetTip(edgeChannel, "Signal for previous / next edge"); AutomationProperties.SetName(edgeChannel, "Edge navigation signal"); Add(nav, edgeChannel, 0, 6);
+        Add(nav, Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge"), 0, 7); Add(nav, Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge"), 0, 8);
+        var guide = Text("Hover to measure · Ctrl + wheel to zoom", true); guide.HorizontalAlignment = HorizontalAlignment.Right; Add(nav, guide, 0, 9); Add(page, nav, 2);
         overview = new TimelineControl(Model, true); Add(page, overview, 3);
         var timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
         var ruler = new TimelineControl(Model, isRuler: true) { HorizontalAlignment = HorizontalAlignment.Left };
         timeline.SizeChanged += (_, _) => ruler.Width = timeline.Bounds.Width;
-        var waveformGrid = new Grid { RowDefinitions = new("42,*") };
+        var waveformGrid = new Grid { RowDefinitions = new("42,Auto,*") };
         Add(waveformGrid, ruler, 0);
-        Add(waveformGrid, new ScrollViewer { Content = timeline, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, 1);
+        var timelineHost = new Grid(); timelineHost.Children.Add(timeline); timelineHost.Children.Add(timeline.LabelControls);
+        Add(waveformGrid, new ScrollViewer { Content = timelineHost, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, 2);
         wavePanel = waveformGrid;
         var packetGrid = new Grid { RowDefinitions = new("Auto,*") }; Add(packetGrid, search, 0); Add(packetGrid, packets, 1); packetPanel = packetGrid;
         search.TextChanged += (_, _) => { if (!updating) Model.Search(search.Text ?? ""); };
@@ -82,18 +87,23 @@ public sealed class MainWindow : Window
         var work = new Grid(); work.Children.Add(wavePanel); work.Children.Add(packetPanel); Add(workspace, work, 0, 0); Add(workspace, splitter, 0, 1);
         inspectorBorder = new Border { BorderBrush = TimelineControl.Ink("#26343F"), BorderThickness = new(1, 0, 0, 0), Child = new ScrollViewer { Content = inspector, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled } };
         Add(workspace, inspectorBorder, 0, 2); Add(page, workspace, 4);
-        var result = new Grid { ColumnDefinitions = new("*,Auto") }; delta.Foreground = TimelineControl.Ink("#78D7C8"); Add(result, delta, 0, 0);
+        var result = new Grid { ColumnDefinitions = new("152,*,Auto") };
+        measurementTitle.TextTrimming = TextTrimming.CharacterEllipsis; measurementTitle.Margin = new(0, 0, 10, 0); Add(result, measurementTitle, 0, 0);
+        delta.Foreground = TimelineControl.Ink("#C9F1EA"); delta.FontFamily = new("Cascadia Mono,Consolas"); delta.FontSize = 14; delta.TextWrapping = TextWrapping.Wrap; Add(result, delta, 0, 1);
+        measurementActions.Spacing = 6; measurementActions.Margin = new(8, 0, 0, 0);
         measurementActions.Children.Add(modePicker); measurementActions.Children.Add(Button("Cancel", CancelEditing, "flat"));
-        measurementActions.Children.Add(Button("Fit A/B", Model.FitMarkers, "flat")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat")); Add(result, measurementActions, 0, 1);
+        measurementActions.Children.Add(Button("Fit", Model.FitMarkers, "flat", "Show both measurement endpoints")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat", "Clear measurement")); Add(result, measurementActions, 0, 2);
         modePicker.SelectionChanged += (_, _) => { if (!updating) Model.SetSnapMode(modePicker.SelectedIndex == 1 ? 2 : 1); };
         foreach (var (label, box, index) in new[] { (aSource, aTime, 0), (bSource, bTime, 1) })
         {
             var endpoint = Row(); endpoint.Margin = new(0, 0, 22, 0); endpoint.Children.Add(label); endpoint.Children.Add(box); endpoint.Children.Add(Text("µs", true));
-            endpoint.Children.Add(Button("Choose", () => Model.Arm(index), "flat", "Replace only this endpoint")); endpoints.Children.Add(endpoint);
+            var choose = Button("Choose", () => Model.Arm(index), "flat", "Replace only this endpoint");
+            AutomationProperties.SetName(choose, $"Choose {(index == 0 ? "A" : "B")} endpoint"); AutomationProperties.SetName(box, $"{(index == 0 ? "A" : "B")} time in microseconds");
+            endpoint.Children.Add(choose); endpoints.Children.Add(endpoint);
         }
         aTime.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitTime(0, aTime); }; bTime.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitTime(1, bTime); };
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
-        hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(page, Band(measurement), 5);
+        hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(waveformGrid, Band(measurement), 1);
         Content = page; Model.Changed += Refresh;
         Opened += async (_, _) => await LoadAsync(); Closing += (_, _) => { loadCancellation?.Cancel(); SavePreferences(); };
         KeyDown += (_, e) =>
@@ -133,13 +143,17 @@ public sealed class MainWindow : Window
             endpoints.IsVisible = Model.Mode != 0 && (hasMarkers || Model.Armed != null);
             modePicker.IsVisible = Model.Mode != 0;
             measurementActions.Children[1].IsVisible = Model.Armed != null;
-            measurementActions.Children[2].IsVisible = Model.A != null && Model.B != null;
+            measurementActions.Children[2].IsVisible = Model.Armed == null && Model.A != null && Model.B != null;
             measurementActions.Children[3].IsVisible = hasMarkers || hint.IsVisible;
             if (!aTime.IsFocused) aTime.Text = Model.A == null ? "" : Model.Us(Model.A.Sample).ToString("0.###", CultureInfo.InvariantCulture);
             if (!bTime.IsFocused) bTime.Text = Model.B == null ? "" : Model.Us(Model.B.Sample).ToString("0.###", CultureInfo.InvariantCulture);
             aTime.IsEnabled = Model.A != null; bTime.IsEnabled = Model.B != null;
             aSource.Text = EndpointLabel(Model.A, "A"); bSource.Text = EndpointLabel(Model.B, "B");
-            delta.Text = Model.Armed is int armed ? $"Choose {(armed == 0 ? "A" : "B")} · {(Model.Mode == 2 ? "position" : "edge")}" : Model.PinnedMeasurement is { } local && Model.Capture is { } capture ? $"D{local.Channel} · {TimingText.Local(local, capture.SampleRate)}"
+            string localSource = Model.PinnedMeasurement is { } pinned ? $"D{pinned.Channel} {Model.Capture?.Signals.FirstOrDefault(s => s.Id == pinned.Channel)?.Name}" : "A/B";
+            string measurementContext = Model.PinnedMeasurement is { } pm ? !Model.Group.Channels.Contains(pm.Channel) ? "Outside group" : pm.Pulse is { } span && (span.End < Model.Start || span.Start > Model.End) ? "Outside time view" : "" : "";
+            measurementTitle.Text = Model.Armed != null ? "Measure A/B" : !hasMarkers ? "Measurement" : measurementContext.Length > 0 ? $"Pinned · D{Model.PinnedMeasurement!.Channel}\n{measurementContext}" : "Pinned · " + localSource;
+            ToolTip.SetTip(measurementTitle, Model.Armed != null ? Model.Hint : !hasMarkers ? "No pinned measurement" : "Pinned · " + localSource + (measurementContext.Length > 0 ? " · " + measurementContext : ""));
+            delta.Text = Model.Armed is int armed ? $"Choose {(armed == 0 ? "A" : "B")} · {(Model.Mode == 2 ? "position" : "edge")}" : Model.PinnedMeasurement is { } local && Model.Capture is { } capture ? TimingText.Local(local, capture.SampleRate)
                 : Model.A == null || Model.B == null ? "A/B measurement" : $"B − A   {(Model.B.Sample > Model.A.Sample ? "+" : "")}{TimingText.Duration((Model.B.Sample - Model.A.Sample) / (double)Model.Capture!.SampleRate)}";
             ToolTip.SetTip(delta, Model.Armed != null ? Model.Hint : Model.PinnedMeasurement is { } m ? $"Local measurement · pulse samples {m.Pulse?.Start}–{m.Pulse?.End}\n" + (m.Cycle is { } cycle ? $"Cycle samples {cycle.Start}–{cycle.End}. This is a local cycle, not a capture-wide frequency." : m.Reason) : "Signed interval between A and B");
             ToolTip.SetTip(aSource, Model.A == null ? "" : $"Sample {Model.A.Sample} · {(Model.A.IsEdge ? "edge" : "position")}"); ToolTip.SetTip(bSource, Model.B == null ? "" : $"Sample {Model.B.Sample} · {(Model.B.IsEdge ? "edge" : "position")}");
@@ -175,7 +189,7 @@ public sealed class MainWindow : Window
     {
         inspector.Children.Clear(); var packet = Model.Selected!;
         var heading = new Grid { ColumnDefinitions = new("*,Auto") }; Add(heading, Text(packet.Decoder.ToUpperInvariant() + " / " + packet.Id, true), 0, 0); Add(heading, Button("×", Model.ToggleDetails, "flat", "Close packet details"), 0, 1); inspector.Children.Add(heading);
-        var title = Text(packet.Title); title.FontSize = 18; title.FontWeight = FontWeight.SemiBold; inspector.Children.Add(title);
+        var title = Text(packet.Title); title.FontSize = 15; title.FontWeight = FontWeight.SemiBold; title.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(title);
         inspector.Children.Add(Text($"{Model.Us(packet.Span.Start):0.##}–{Model.Us(packet.Span.End):0.##} µs", true));
         packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
         inspector.Children.Add(Text(packet.Address + (packet.Decoder == "i2c" ? " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
@@ -188,7 +202,7 @@ public sealed class MainWindow : Window
             {
                 var row = new Grid { ColumnDefinitions = new("*,Auto") }; Add(row, Text(field.Name), 0, 0);
                 var value = field.Name == "Payload" && packet.Value is int number ? $"0x{number:X4}" : "0x" + string.Join("", field.Raw.Select(b => b.ToString("X2")));
-                Add(row, Text(value), 0, 1); inspector.Children.Add(row);
+                var fieldValue = Text(value); fieldValue.FontFamily = new("Cascadia Mono,Consolas"); Add(row, fieldValue, 0, 1); inspector.Children.Add(row);
             }
         }
         if (packet.Error != null)
@@ -236,11 +250,15 @@ public sealed class MainWindow : Window
     }
     private async void EditColor(int channel)
     {
-        var dialog = new Window { Title = $"D{channel} waveform color", Width = 390, Height = 245, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var dialog = new Window { Title = $"D{channel} waveform color", Width = 410, Height = 290, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var body = new StackPanel { Margin = new(20), Spacing = 14 }; body.Children.Add(Text($"D{channel} · waveform line"));
         var input = new TextBox { Text = Model.Colors.GetValueOrDefault(channel, channel == 0 ? "#D4AD00" : "#C7D2DB"), PlaceholderText = "#RRGGBB" }; body.Children.Add(input);
-        var presets = Row(); foreach (var hex in new[] { "#D4AD00", "#78D7C8", "#8BB7FF", "#E58C8C", "#C7D2DB" }) { var b = Button("", () => input.Text = hex); b.Background = TimelineControl.Ink(hex); b.Width = 42; presets.Children.Add(b); } body.Children.Add(presets);
-        var actions = Row(); actions.Children.Add(Button("Use default", () => { Model.Colors.Remove(channel); Model.Notify(); SavePreferences(); dialog.Close(); })); actions.Children.Add(Button("Apply", () => { if (Color.TryParse(input.Text, out var color)) { Model.Colors[channel] = color.ToString(); Model.Notify(); SavePreferences(); dialog.Close(); } else input.PlaceholderText = "Use a valid color such as #D4AD00"; }, "primary")); body.Children.Add(actions);
+        AutomationProperties.SetName(input, "Waveform color hex value");
+        var presets = Row(); foreach (var hex in new[] { "#D4AD00", "#78D7C8", "#8BB7FF", "#E58C8C", "#C7D2DB" }) { var b = Button("", () => input.Text = hex, tip: hex); b.Background = TimelineControl.Ink(hex); b.Width = 42; presets.Children.Add(b); } body.Children.Add(presets);
+        var feedback = Text("Physical probe color stays unchanged.", true); feedback.TextWrapping = TextWrapping.Wrap; body.Children.Add(feedback);
+        var actions = Row(); actions.Children.Add(Button("Use default", () => { Model.Colors.Remove(channel); Model.Notify(); SavePreferences(); dialog.Close(); }));
+        var cancel = Button("Cancel", dialog.Close); cancel.IsCancel = true; actions.Children.Add(cancel);
+        var apply = Button("Apply", () => { if (Color.TryParse(input.Text, out var color)) { Model.Colors[channel] = color.ToString(); Model.Notify(); SavePreferences(); dialog.Close(); } else { feedback.Text = "Enter a valid color, for example #D4AD00."; feedback.Foreground = TimelineControl.Ink("#FF9AAA"); input.Focus(); } }, "primary"); apply.IsDefault = true; actions.Children.Add(apply); body.Children.Add(actions);
         dialog.Content = body; await dialog.ShowDialog(this);
     }
     private async void ShowInfo()
@@ -269,7 +287,7 @@ public sealed class MainWindow : Window
     private sealed record Preferences(int Version, string ActiveGroup, ObservationGroup[] Groups, Dictionary<int, string> Colors);
     private static TextBlock Text(string value, bool muted = false) => new() { Text = value, VerticalAlignment = VerticalAlignment.Center, Foreground = TimelineControl.Ink(muted ? "#9BAEBF" : "#E4EAF0"), FontSize = muted ? 12 : 13 };
     private static StackPanel Row() => new() { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
-    private static Button Button(string label, Action action, string? style = null, string? tip = null) { var button = new Button { Content = label, VerticalAlignment = VerticalAlignment.Center }; if (style != null) button.Classes.Add(style); if (tip != null) ToolTip.SetTip(button, tip); button.Click += (_, _) => action(); return button; }
+    private static Button Button(string label, Action action, string? style = null, string? tip = null) { var button = new Button { Content = label, VerticalAlignment = VerticalAlignment.Center }; if (style != null) button.Classes.Add(style); if (tip != null) { ToolTip.SetTip(button, tip); if (string.IsNullOrWhiteSpace(label) || label is "←" or "−" or "+" or "‹" or "›" or "×") AutomationProperties.SetName(button, tip); } button.Click += (_, _) => action(); return button; }
     private static Border Band(Control child) => new() { BorderThickness = new(0, 0, 0, 1), BorderBrush = TimelineControl.Ink("#26343F"), Child = child };
     private static void Add(Grid grid, Control child, int row, int column = 0) { Grid.SetRow(child, row); Grid.SetColumn(child, column); grid.Children.Add(child); }
 }
