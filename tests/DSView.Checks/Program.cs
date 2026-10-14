@@ -220,6 +220,7 @@ GroupEditingChecks.Run(Check, capture);
 MeasurementRecoveryChecks.Run(Check, denseCapture);
 await AnalysisFileChecks.RunAsync(Check, capture, denseCapture);
 await ProtocolSelectionChecks.RunAsync(Check, capture);
+await TimingResultChecks.RunAsync(Check, capture);
 int nativeOption = Array.IndexOf(args, "--native-i2c");
 if (nativeOption >= 0 && nativeOption + 1 >= args.Length) throw new ArgumentException("--native-i2c requires a configuration path.");
 await RawDecodeChecks.Run(Check, nativeOption < 0 ? null : args[nativeOption + 1]);

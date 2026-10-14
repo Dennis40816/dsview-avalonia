@@ -25,7 +25,7 @@ public static class AnalysisFile
             if (info.Kind != JsonTypeInfoKind.Object) return;
             for (int i = info.Properties.Count - 1; i >= 0; i--)
                 if (info.Properties[i].Set == null) info.Properties.RemoveAt(i); // Also excludes read-only collections such as Capture.Issues.
-                else info.Properties[i].IsRequired = !(info.Type == typeof(AnalysisState) && info.Properties[i].Name == "selectedProtocolIndex"); // Only the additive presentation selection is optional; evidence remains required.
+                else info.Properties[i].IsRequired = !(info.Type == typeof(AnalysisState) && info.Properties[i].Name is "selectedProtocolIndex" or "measurements"); // Version-specific evidence requirements are validated below.
         });
         return resolver;
     }
@@ -37,13 +37,13 @@ public static class AnalysisFile
         if (file.Length is <= 0 or > MaximumBytes) throw new InvalidDataException("Analysis file must be between 1 byte and 128 MiB.");
         var document = await JsonSerializer.DeserializeAsync<AnalysisDocument>(file, Json, cancellation)
             ?? throw new InvalidDataException("Analysis document is missing.");
-        Validate(document, cancellation); return document;
+        Validate(document, cancellation); return Normalize(document);
     }, cancellation);
 
     public static Task WriteAsync(string path, AnalysisDocument document, CancellationToken cancellation = default) => Task.Run(async () =>
     {
         Validate(document, cancellation);
-        document = document with { Version = AnalysisDocument.CurrentVersion };
+        document = Normalize(document) with { Version = AnalysisDocument.CurrentVersion };
         string destination = Path.GetFullPath(path);
         string temporary = Path.Combine(Path.GetDirectoryName(destination)!, ".dsview2-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
@@ -60,6 +60,36 @@ public static class AnalysisFile
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }, cancellation);
+
+    private static AnalysisDocument Normalize(AnalysisDocument document) => document with
+    { State = document.State with { Measurements = document.State.Measurements ?? [] } };
+
+    public static void ValidateTimingResult(Capture capture, TimingResult result)
+    {
+        if (result == null || !Guid.TryParseExact(result.Id, "N", out _) || !TimingResult.ValidMetadata(result.Name, result.Note)
+            || result.A == null || result.B == null) throw new InvalidDataException("Invalid timing result identity, name, note or endpoints.");
+        ValidateMeasurement(capture, result.A, result.B, result.LocalPulse ? 0 : 2, result.LocalPulse);
+    }
+    private static void ValidateMeasurement(Capture capture, Endpoint? a, Endpoint? b, int mode, bool localPulse)
+    {
+        foreach (var endpoint in new[] { a, b }.OfType<Endpoint>())
+        {
+            var signal = capture.Signals.FirstOrDefault(s => s.Id == endpoint.Channel);
+            if (signal == null || endpoint.Sample < 0 || endpoint.Sample >= capture.SampleCount)
+                throw new InvalidDataException("Measurement source is missing or outside capture.");
+            if (endpoint.IsEdge && (!capture.HasSample(endpoint.Sample) || signal.Nearest(endpoint.Sample)?.Sample != endpoint.Sample))
+                throw new InvalidDataException("Saved edge does not match an observed raw transition.");
+        }
+        if (mode is < 0 or > 2) throw new InvalidDataException("Invalid measurement mode.");
+        if (localPulse)
+        {
+            var local = a == null ? null : capture.MeasureAt(a.Channel, a.Sample);
+            if (mode != 0 || a is not { IsEdge: true } || b is not { IsEdge: true } || a.Channel != b.Channel
+                || local?.Pulse is not { } pulse || pulse.Start != a.Sample || pulse.End != b.Sample)
+                throw new InvalidDataException("Saved local measurement does not match raw pulse evidence.");
+        }
+        else if (mode == 0 && (a != null || b != null)) throw new InvalidDataException("Local measurement identity is missing.");
+    }
 
     private sealed class BoundedOutput(Stream inner) : Stream
     {
@@ -83,7 +113,7 @@ public static class AnalysisFile
         static void Require([DoesNotReturnIf(false)] bool condition, string message) { if (!condition) throw new InvalidDataException(message); }
         static bool Text(string? value, int maximum = 4096) => value != null && value.Length <= maximum && !value.Any(c => char.IsControl(c) && c is not ('\n' or '\r' or '\t'));
         static bool Name(string? value, int maximum = 128) => Text(value, maximum) && !string.IsNullOrWhiteSpace(value);
-        Require(document != null && document.Format == AnalysisDocument.FileFormat && document.Version is 1 or AnalysisDocument.CurrentVersion, "Unsupported analysis format or version.");
+        Require(document != null && document.Format == AnalysisDocument.FileFormat && document.Version is >= 1 and <= AnalysisDocument.CurrentVersion, "Unsupported analysis format or version.");
         Require(Name(document!.SourceName), "Invalid source name.");
         var capture = document.Capture; var state = document.State;
         Require(capture != null && state != null, "Capture or analysis state is missing.");
@@ -143,19 +173,17 @@ public static class AnalysisFile
         Require(state.ActiveGroup == "All signals" || state.Groups.Any(g => g.Name == state.ActiveGroup), "Active Group is missing.");
         Require(state.Colors!.All(c => c.Key is >= 0 and < 32 && c.Value != null && c.Value.Length is 7 or 9 && c.Value[0] == '#' && c.Value.Skip(1).All(Uri.IsHexDigit)), "Invalid waveform colors.");
         Require(double.IsFinite(state.Start) && double.IsFinite(state.End) && state.Start >= 0 && state.End <= capture.SampleCount && state.End - state.Start >= 10, "Invalid time viewport.");
-        foreach (var endpoint in new[] { state.A, state.B }.OfType<Endpoint>())
+        ValidateMeasurement(capture, state.A, state.B, state.Mode, state.LocalPulse);
+        Require(Text(state.Query, 4096), "Invalid search.");
+        Require(document.Version < 3 || state.Measurements != null, "Saved timing results are missing.");
+        Require(state.Measurements == null || state.Measurements.Length <= TimingResult.MaximumCount, "Too many saved timing results.");
+        Require(document.Version >= 3 || state.Measurements is null or { Length: 0 }, "Timing results require analysis version 3.");
+        var resultIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var result in state.Measurements ?? [])
         {
-            var signal = capture.Signals.FirstOrDefault(s => s.Id == endpoint.Channel);
-            Require(signal != null && endpoint.Sample >= 0 && endpoint.Sample < capture.SampleCount, "Measurement source is missing or outside capture.");
-            Require(!endpoint.IsEdge || (capture.HasSample(endpoint.Sample) && signal!.Nearest(endpoint.Sample)?.Sample == endpoint.Sample), "Saved edge does not match an observed raw transition.");
+            ValidateTimingResult(capture, result);
+            Require(resultIds.Add(result.Id), "Duplicate timing result identity.");
         }
-        Require(state.Mode is >= 0 and <= 2 && Text(state.Query, 4096), "Invalid measurement mode or search.");
-        if (state.LocalPulse)
-        {
-            var local = state.A == null ? null : capture.MeasureAt(state.A.Channel, state.A.Sample);
-            Require(state.Mode == 0 && state.A is { IsEdge: true } && state.B is { IsEdge: true } && state.A.Channel == state.B.Channel && local?.Pulse is { } pulse && pulse.Start == state.A.Sample && pulse.End == state.B.Sample, "Saved local measurement does not match raw pulse evidence.");
-        }
-        else Require(state.Mode != 0 || (state.A == null && state.B == null), "Local measurement identity is missing.");
         Require(state.SelectedPacket == null || packetIds.Contains(state.SelectedPacket), "Selected packet is missing.");
         Require(!state.Details || state.SelectedPacket != null, "Packet detail has no selection.");
         Require(state.SelectedIssue == null || capture.Issues.Any(i => i.Packet.Id == state.SelectedPacket && i.Diagnostic.Id == state.SelectedIssue), "Selected diagnostic is missing.");

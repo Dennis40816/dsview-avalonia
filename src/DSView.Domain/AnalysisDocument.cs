@@ -6,7 +6,7 @@ namespace DSView.Domain;
 public sealed record AnalysisDocument(string Format, int Version, string SourceName, Capture Capture, AnalysisState State)
 {
     public const string FileFormat = "DSView2 analysis";
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 }
 
 public sealed record ViewAnchor(int? Channel, double Offset);
@@ -15,6 +15,8 @@ public sealed record AnalysisState(ObservationGroup[] Groups, string ActiveGroup
     string? SelectedPacket, string? SelectedIssue, bool Details, bool PacketsTab, string Query,
     ViewAnchor Vertical, int? EdgeChannel)
 {
+    // Nullable only to detect missing v3 evidence while accepting older documents.
+    public TimingResult[]? Measurements { get; init; }
     // Optional presentation state: v1 files have no selected protocol element.
     public int? SelectedProtocolIndex { get; init; }
 }

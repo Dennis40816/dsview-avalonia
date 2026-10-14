@@ -21,7 +21,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 捲動通道時時間尺保持可見。局部頻率不代表整段資料具有穩定的時鐘頻率。
 
 選取某個 Hex byte，可在原有詳情區連結其數值、解析區間與欄位；ACK、START／STOP 各自獨立。
-Locate selected 定位該來源，Previous 返回前一視野，A/B 不變。分析檔 v2 會保存逐項選取，仍可讀取 v1。
+Locate selected 定位該來源，Previous 返回前一視野，A/B 不變。分析檔 v3 保存逐項選取與多筆量測，仍可讀取 v1／v2。
 詳見 [協議資料選取](docs/PROTOCOL-SELECTION.md)。
 
 Activity 可比較全部已擷取通道在整段資料與目前視野的活動。
@@ -96,7 +96,11 @@ Activity 的 Show 顯示指定通道，不改時間範圍。
 若自訂 Group 已不包含解析器所需通道，明確定位來源／異常時會建立來源 Group。
 
 實體探針色條固定。點訊號名稱旁獨立的短線可改波形顏色。
-Group／線色偏好會保存；量測與擷取工作階段尚未保存。
+Group／線色偏好會保存；Save analysis 保存擷取資料、目前量測與已保留結果。
+
+完整量測旁的 Keep result 可保留一份副本；Results 集中顯示名稱、備註及精確來源，
+Show on waveform 叫出副本並定位。Clear 只清除目前 A/B，不刪已保留結果。
+刪除結果可 Undo；名稱／備註與多筆結果會一起保存。詳見英文 [timing results](docs/TIMING-RESULTS.md)。
 
 已操作驗證 Windows 原生介面。其他桌面平台、完整 DPI 組合及大資料效能仍待驗證。
 合成範例不能證明真實裝置的時間精度或解析器正確性。

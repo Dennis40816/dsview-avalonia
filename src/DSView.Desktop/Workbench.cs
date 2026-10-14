@@ -8,7 +8,7 @@ using DSView.Infrastructure;
 
 namespace DSView.Desktop;
 
-public sealed class Workbench : ObservableObject
+public sealed partial class Workbench : ObservableObject
 {
     public Capture? Capture { get; private set; }
     public ObservableCollection<ObservationGroup> Groups { get; } = [new("I²C + Control", [0, 1, 8], ["i2c"]), new("UART + SPI", [2, 3, 4, 5, 6, 7], ["spi", "ua", "ub"]), new("All signals", Enumerable.Range(0, 32).ToArray(), [])];
@@ -49,7 +49,7 @@ public sealed class Workbench : ObservableObject
         var committed = editOrigin ?? (A, B, Mode, PinnedMeasurement);
         return new(Groups.Where(g => g.Name != "All signals").Select(g => new ObservationGroup(g.Name, g.Channels.ToArray(), g.Decoders.ToArray())).ToArray(),
             Group.Name, Colors.OrderBy(c => c.Key).ToDictionary(), Start, End, committed.Item1, committed.Item2, committed.Item3, committed.Item4 != null,
-            Selected?.Id, SelectedIssue?.Diagnostic.Id, Details && Selected != null, PacketsTab, Query, vertical, edgeChannel) { SelectedProtocolIndex = SelectedProtocolIndex };
+            Selected?.Id, SelectedIssue?.Diagnostic.Id, Details && Selected != null, PacketsTab, Query, vertical, edgeChannel) { SelectedProtocolIndex = SelectedProtocolIndex, Measurements = keptMeasurements.ToArray() };
     }
     public void RestoreAnalysis(AnalysisDocument document)
     {
@@ -77,6 +77,7 @@ public sealed class Workbench : ObservableObject
         Capture = capture; Groups.Clear(); foreach (var group in groups) Groups.Add(group);
         Group = Groups.Single(g => g.Name == state.ActiveGroup);
         Colors.Clear(); foreach (var pair in state.Colors) Colors.Add(pair.Key, pair.Value);
+        keptMeasurements.Clear(); keptMeasurements.AddRange(state.Measurements ?? []); removedMeasurement = null;
         A = state.A; B = state.B; Mode = state.Mode; PinnedMeasurement = prepared.Local;
         Selected = prepared.Selected; Issues = prepared.Issues; SelectedIssue = prepared.Issue; Details = state.Details;
         SelectedProtocolIndex = state.SelectedProtocolIndex;
@@ -116,6 +117,7 @@ public sealed class Workbench : ObservableObject
     public void Load(Capture capture)
     {
         if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
+        keptMeasurements.Clear(); removedMeasurement = null;
         Capture = capture; A = B = Probe = null; PinnedMeasurement = null; Selected = null; SelectedIssue = null; Issues = capture.Issues; Details = false;
         SelectedProtocol = null; SelectedProtocolIndex = null;
         if (!capture.Signals.Any(s => Group.Channels.Contains(s.Id)))

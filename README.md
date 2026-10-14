@@ -128,7 +128,11 @@ longer contain the decoder's required channels.
 
 The physical probe swatch is fixed. Click the separate short line beside a
 signal name to customize its waveform color. Group/color preferences are saved
-locally; measurements and capture sessions are not yet saved.
+locally. Save analysis stores the capture, working measurement and kept results.
+
+Keep result copies a complete measurement. Results opens a compact list with
+names, notes and exact sources; Show on waveform restores a working copy.
+Clear affects only the working pair. See [timing results](docs/TIMING-RESULTS.md).
 
 Windows native interaction has been exercised. Other desktop platforms, the
 full DPI matrix and large-recording performance still need validation. The

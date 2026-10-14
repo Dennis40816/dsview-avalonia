@@ -56,12 +56,12 @@ internal static class ProtocolSelectionChecks
             var document = new AnalysisDocument(AnalysisDocument.FileFormat, AnalysisDocument.CurrentVersion, "Board bring-up", board, model.SnapshotState(new(null, 0), 0));
             await AnalysisFile.WriteAsync(path, document); var restored = new Workbench(); restored.RestoreAnalysis(await AnalysisFile.ReadAsync(path));
             check(restored.SelectedProtocol is { DataIndex: 3, Label: "0x35" } saved && saved.Span == items[index].Span && restored.A == a && restored.B == b,
-                "Version 2 reopens selected byte from the saved graph with unchanged A/B");
+                "Current version reopens selected byte from the saved graph with unchanged A/B");
             var legacy = JsonNode.Parse(await File.ReadAllTextAsync(path))!; legacy["version"] = 1; legacy["state"]!.AsObject().Remove("selectedProtocolIndex");
             await File.WriteAllTextAsync(path, legacy.ToJsonString()); var old = await AnalysisFile.ReadAsync(path); restored.RestoreAnalysis(old);
             check(restored.Selected?.Id == packet.Id && restored.SelectedProtocol == null && restored.A == a, "Version 1 files without element selection reopen at packet level");
             await AnalysisFile.WriteAsync(path, old);
-            check((await AnalysisFile.ReadAsync(path)).Version == 2, "Saving a legacy document writes current version without re-decoding evidence");
+            check((await AnalysisFile.ReadAsync(path)).Version == AnalysisDocument.CurrentVersion, "Saving a legacy document writes current version without re-decoding evidence");
             bool rejected = false;
             try { restored.RestoreAnalysis(document with { State = document.State with { SelectedProtocolIndex = int.MaxValue } }); }
             catch (InvalidDataException) { rejected = true; }

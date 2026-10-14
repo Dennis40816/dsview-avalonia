@@ -47,7 +47,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock packetEmptyText = Text("");
     private readonly Button packetEmptyAction;
     private PacketEmptyReason packetEmptyReason;
-    private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton, activityButton, issuesButton;
+    private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton, activityButton, issuesButton, resultsButton, keepResultButton;
     private readonly ScrollViewer waveScroll;
     private DemoExample activeExample = DemoCaptureSource.Examples[0];
     private readonly Control wavePanel, packetPanel;
@@ -79,14 +79,15 @@ public sealed partial class MainWindow : Window
         reloadButton = Button("File ▾", ShowFiles, tip: "Open or save an analysis"); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
         status.MaxWidth = 380; status.TextTrimming = TextTrimming.CharacterEllipsis;
         Add(page, Band(header), 0);
-        var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto"), Margin = new(16, 0) };
+        var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto,Auto"), Margin = new(16, 0) };
         Add(groupBar, Text("Group", true), 0, 0); groupPicker.Margin = new(10, 0); groupPicker.ItemsSource = Model.Groups; groupPicker.SelectedItem = Model.Group;
         groupPicker.SelectionChanged += (_, _) => { if (!updating && groupPicker.SelectedItem is ObservationGroup group) Model.SetGroup(group); };
         Add(groupBar, groupPicker, 0, 1); Add(groupBar, Button("Edit", () => EditGroup(false), "flat", "Edit signal group"), 0, 2);
         Add(groupBar, Button("All signals", Model.ShowAll, "flat"), 0, 3);
         activityButton = Button("Activity", ShowActivity, "flat", "All captured channels: full-capture activity compared with the current time view"); activityButton.HorizontalAlignment = HorizontalAlignment.Left; Add(groupBar, activityButton, 0, 4);
         detailButton = Button("Packet details", Model.ToggleDetails, "flat"); Add(groupBar, detailButton, 0, 5);
-        measureButton = Button("Measure A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Choose two edges or positions, on any channels"); Add(groupBar, measureButton, 0, 6); Add(page, Band(groupBar), 1);
+        resultsButton = Button("Results", () => _ = ShowTimingResultsAsync(), "flat", "Kept timing results and notes"); Add(groupBar, resultsButton, 0, 6);
+        measureButton = Button("Measure A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Choose two edges or positions, on any channels"); Add(groupBar, measureButton, 0, 7); Add(page, Band(groupBar), 1);
         var nav = navigation;
         Add(nav, Button("←", Model.Previous, "flat", "Previous view"), 0, 0); Add(nav, Button("Fit time", Model.FitTime, "flat"), 0, 1);
         Add(nav, Button("−", () => Model.Zoom(1.5), "flat", "Zoom out"), 0, 2); Add(nav, Button("+", () => Model.Zoom(1 / 1.5), "flat", "Zoom in"), 0, 3);
@@ -139,6 +140,7 @@ public sealed partial class MainWindow : Window
         measurementActions.Spacing = 6; measurementActions.Margin = new(8, 0, 0, 0);
         measurementActions.Children.Add(modePicker); measurementActions.Children.Add(Button("Cancel", CancelEditing, "flat"));
         measurementActions.Children.Add(Button("Fit", Model.FitMarkers, "flat", "Fit A/B time span and reveal source rows when they fit")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat", "Clear measurement")); Add(result, measurementActions, 0, 2);
+        keepResultButton = Button("Keep result", KeepTimingResult, "flat", "Keep a copy of this measurement in the analysis"); measurementActions.Children.Add(keepResultButton);
         modePicker.SelectionChanged += (_, _) => { if (!updating) Model.SetSnapMode(modePicker.SelectedIndex == 1 ? 2 : 1); };
         foreach (var (label, box, index) in new[] { (aSource, aTime, 0), (bSource, bTime, 1) })
         {
@@ -213,6 +215,8 @@ public sealed partial class MainWindow : Window
             groupPicker.SelectedItem = Model.Group; activityButton.Content = $"Activity · {Model.Capture?.Signals.Count ?? 0} signals";
             AutomationProperties.SetName(activityButton, $"Activity · {Model.Signals.Count} visible of {Model.Capture?.Signals.Count ?? 0} captured signals");
             issuesButton.Content = $"Capture issues · {Model.Issues.Count}"; issuesButton.IsVisible = Model.Issues.Count > 0;
+            resultsButton.Content = $"Results · {Model.Measurements.Count}"; resultsButton.IsVisible = Model.Measurements.Count > 0 || Model.CanUndoMeasurementRemoval;
+            keepResultButton.IsVisible = Model.A != null && Model.B != null && !Model.HasPendingEdit;
             range.Text = Model.RangeText;
             if (search.Text != Model.Query) search.Text = Model.Query;
             var old = edgeChannel.SelectedItem as string; var choices = Model.Signals.Select(c => $"D{c.Id}").ToArray();
@@ -261,6 +265,7 @@ public sealed partial class MainWindow : Window
             UpdateMeasurementContext();
             delta.Text = Model.Armed is int armed ? $"Choose {(armed == 0 ? "A" : "B")} · {(Model.Mode == 2 ? "position" : "edge")}" : Model.PinnedMeasurement is { } local && Model.Capture is { } capture ? TimingText.Local(local, capture.SampleRate)
                 : Model.A == null || Model.B == null ? "A/B measurement" : $"B − A   {(Model.B.Sample > Model.A.Sample ? "+" : "")}{TimingText.Duration((Model.B.Sample - Model.A.Sample) / (double)Model.Capture!.SampleRate)}";
+            foreach (string unit in new[] { "ns", "µs", "ms", "s", "Hz", "kHz", "MHz" }) delta.Text = delta.Text?.Replace(" " + unit, "\u00a0" + unit, StringComparison.Ordinal);
             ToolTip.SetTip(delta, Model.Armed != null ? Model.Hint : Model.PinnedMeasurement is { } m ? $"Local measurement · pulse samples {m.Pulse?.Start}–{m.Pulse?.End}\n" + (m.Cycle is { } cycle ? $"Cycle samples {cycle.Start}–{cycle.End}. This is a local cycle, not a capture-wide frequency." : m.Reason) : "Signed interval between A and B");
             ToolTip.SetTip(aSource, Model.A == null ? "" : $"Sample {Model.A.Sample} · {(Model.A.IsEdge ? "edge" : "position")}"); ToolTip.SetTip(bSource, Model.B == null ? "" : $"Sample {Model.B.Sample} · {(Model.B.IsEdge ? "edge" : "position")}");
             bool showDetails = Model.Details && Model.Selected != null;
@@ -300,8 +305,8 @@ public sealed partial class MainWindow : Window
         bool hasMarkers = Model.A != null || Model.B != null;
         string localSource = Model.PinnedMeasurement is { } pinned ? $"D{pinned.Channel} {Model.Capture?.Signals.FirstOrDefault(s => s.Id == pinned.Channel)?.Name}" : "A/B";
         string context = Model.PinnedMeasurement is { } pm ? !Model.Group.Channels.Contains(pm.Channel) ? "Outside group" : pm.Pulse is { } span && (span.End < Model.Start || span.Start > Model.End) ? "Outside time view" : VerticalContext(pm.Channel) : "";
-        measurementTitle.Text = Model.Armed != null ? "Measure A/B" : !hasMarkers ? "Measurement" : context.Length > 0 ? $"Pinned · D{Model.PinnedMeasurement!.Channel}\n{context}" : "Pinned · " + localSource;
-        ToolTip.SetTip(measurementTitle, Model.Armed != null ? Model.Hint : !hasMarkers ? "No pinned measurement" : "Pinned · " + localSource + (context.Length > 0 ? " · " + context : ""));
+        measurementTitle.Text = Model.Armed != null ? "Measure A/B" : !hasMarkers ? "Measurement" : context.Length > 0 ? $"Current · D{Model.PinnedMeasurement!.Channel}\n{context}" : "Current · " + localSource;
+        ToolTip.SetTip(measurementTitle, Model.Armed != null ? Model.Hint : !hasMarkers ? "No current measurement" : "Current · " + localSource + (context.Length > 0 ? " · " + context : ""));
     }
     private async void RecoverPackets()
     {
