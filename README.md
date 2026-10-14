@@ -44,6 +44,12 @@ Focused numerical and state checks:
 dotnet run --project tests/DSView.Checks --no-build
 ```
 
+Open the capture source button in the header to switch between **Board bring-up**
+(50 MS/s) and **Timing + gaps** (10 MS/s). The latter has changed bytes and clock
+timing, read termination, an address NACK and missing coverage. Opening an example
+clears analysis state while preserving Group/color preferences. See
+[offline examples and answer key](docs/OFFLINE-EXAMPLES.md).
+
 Start with a Group or All signals. Hover a pulse to preview timing; click to pin
 it. Use Measure A/B to choose two references, or choose Position for sample-grid
 locations. Escape cancels a pending selection or numeric edit. Ctrl + wheel

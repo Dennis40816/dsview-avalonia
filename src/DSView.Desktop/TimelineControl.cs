@@ -121,7 +121,7 @@ public sealed class TimelineControl : Control
             using (context.PushClip(new Rect(LabelWidth, y, PlotWidth, 38)))
             foreach (var packet in model.Capture.Packets.Where(p => p.Decoder == decoder.Id && p.Span.End >= model.Start && p.Span.Start <= model.End))
             {
-                bool detailed = decoder.Id == "i2c" && 1000d / (model.End - model.Start) * PlotWidth >= 43;
+                bool detailed = packet.WireCells.Any(cell => (cell.Data.End - cell.Data.Start) / (model.End - model.Start) * PlotWidth >= 43);
                 var items = detailed ? model.Capture.ProtocolItems(packet) : [new ProtocolItem(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
                 foreach (var item in items)
                 {
@@ -207,7 +207,19 @@ public sealed class TimelineControl : Control
                     if (r <= l) continue;
                     context.FillRectangle(Surface, new(l, y + 12, r - l, 29));
                     context.DrawLine(new Pen(Muted, 1, DashStyle.Dash), new(l, y + 26), new(r, y + 26));
-                    if (r - l > 100) Label(context, "Unknown level", l + 5, y + 12, Muted, 11);
+                    // Missing-sample hatching is drawn later. Keep this label in the
+                    // uncovered interval so that a gap cannot erase half its text.
+                    long labelStart = unknown.Start;
+                    foreach (var gap in model.Capture.Gaps)
+                        if (gap.Start < unknown.End && gap.End > labelStart)
+                            labelStart = Math.Min(unknown.End, gap.End);
+                    var labelX = Math.Max(LabelWidth, X(labelStart));
+                    if (r - labelX > 100) Label(context, "Unknown level", labelX + 5, y + 12, Muted, 11);
+                    // The first observed transition can end at the same level as before a gap.
+                    // Draw that edge explicitly without inventing its preceding stable interval.
+                    int recovery = signal.LowerBound(unknown.End);
+                    if (recovery < signal.Edges.Count && signal.Edges[recovery].Sample == unknown.End && unknown.End >= model.Start && unknown.End <= model.End)
+                        context.DrawLine(new Pen(color, 1.35), new(X(unknown.End), y + 16), new(X(unknown.End), y + 35));
                 }
             }
         }
@@ -271,7 +283,7 @@ public sealed class TimelineControl : Control
         {
             double left = LabelWidth + Math.Clamp(gap.Start / (double)model.Capture.SampleCount, 0, 1) * PlotWidth;
             double right = LabelWidth + Math.Clamp(gap.End / (double)model.Capture.SampleCount, 0, 1) * PlotWidth;
-            if (right > left) context.DrawRectangle(Ink("#402F32"), new Pen(Muted, 1, DashStyle.Dash), new(left, 8, right - left, 30));
+            if (right > left) context.DrawRectangle(Ink("#402F32"), new Pen(Muted, 1, DashStyle.Dash), new(Math.Min(left, LabelWidth + PlotWidth - 2), 8, Math.Max(2, right - left), 30));
         }
         foreach (var issue in model.Issues.Where(i => model.IsAllSignals || model.Group.Decoders.Contains(i.Packet.Decoder)))
         {

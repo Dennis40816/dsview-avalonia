@@ -37,15 +37,17 @@ public sealed record PacketField(string Name, byte[] Raw, IReadOnlyList<SourceSp
 public sealed record PacketDiagnostic(string Id, string Layer, string Code, string Message, IReadOnlyList<SourceSpan> Spans, string? Field = null);
 public sealed record CaptureIssue(Packet Packet, PacketDiagnostic Diagnostic);
 public sealed record I2cTransfer(bool Read, IReadOnlyList<bool?> Acknowledged);
+public sealed record I2cCell(SourceSpan Data, SourceSpan Acknowledge);
 public sealed record SignalActivity(int Edges, bool Complete, bool? ConstantLevel);
 public sealed record Packet(string Id, string Decoder, SourceSpan Span, byte[] Bytes, string Address,
     string Title, string? Error, int? Value, IReadOnlyList<PacketField> Fields)
 {
     public IReadOnlyList<PacketDiagnostic> Diagnostics { get; init; } = [];
     public I2cTransfer? I2c { get; init; }
+    public IReadOnlyList<I2cCell> WireCells { get; init; } = [];
     public string Direction => I2c == null ? "?" : I2c.Read ? "R" : "W";
     public string Hex => string.Join(" ", Bytes.Select(b => b.ToString("X2")));
-    public override string ToString() => $"{Id,-8} {Decoder.ToUpperInvariant(),-5}   {Span.Start / 50d,8:0.##} µs   {Hex,-22}   {Error ?? Title}";
+    public override string ToString() => $"{Id} · {Decoder.ToUpperInvariant()} · {Hex} · {Error ?? Title}";
 }
 public sealed record ProtocolItem(Packet Packet, string Label, SourceSpan Span, string Kind);
 public sealed record Decoder(string Id, string Name, int[] Channels);
@@ -105,6 +107,7 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
         var signal = Signals.FirstOrDefault(s => s.Id == channel);
         if (signal == null || sample < 0 || sample >= SampleCount)
             return new(channel, false, null, null, null, "Outside capture");
+        if (!HasSample(sample)) return new(channel, false, null, null, null, "Missing samples at this position");
         var pair = signal.Surrounding(sample);
         if (pair is not { } p) return new(channel, false, null, null, null, "Incomplete pulse at capture boundary");
         bool Missing(long start, long end) => Gaps.Any(g => g.Start <= end && g.End > start);
@@ -127,18 +130,16 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
     public static readonly Decoder[] Decoders = [new("i2c", "I²C", [0, 1]), new("spi", "SPI", [2, 3, 4, 5]), new("ua", "UART TX", [6]), new("ub", "UART RX", [7])];
     public IReadOnlyList<ProtocolItem> ProtocolItems(Packet packet)
     {
-        if (packet.Decoder != "i2c") return [new(packet, packet.Hex, packet.Span, "data")];
-        // Synthetic fixture metadata, not a live protocol decoder. Coordinates are sample indices.
+        if (packet.Decoder != "i2c" || packet.WireCells.Count != packet.Bytes.Length + 1)
+            return [new(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
+        // Explicit synthetic annotations, not a live protocol decoder. Never infer bit time from sample rate.
         var result = new List<ProtocolItem> { new(packet, "START", new(packet.Span.Start, packet.Span.Start), "point") };
-        long first = packet.Span.Start + 125;
         string Ack(int index) => packet.I2c?.Acknowledged.ElementAtOrDefault(index) switch { true => "ACK", false => "NACK", _ => "?" };
-        result.Add(new(packet, packet.Address + (packet.I2c == null ? " ?" : packet.I2c.Read ? " R" : " W"), new(first, first + 1000), "data"));
-        result.Add(new(packet, Ack(0), new(first + 1000, first + 1125), "ack"));
-        for (int i = 0; i < packet.Bytes.Length; i++)
+        for (int i = 0; i < packet.WireCells.Count; i++)
         {
-            long start = first + (i + 1) * 1125;
-            result.Add(new(packet, $"0x{packet.Bytes[i]:X2}", new(start, start + 1000), "data"));
-            result.Add(new(packet, Ack(i + 1), new(start + 1000, start + 1125), "ack"));
+            var cell = packet.WireCells[i];
+            result.Add(new(packet, i == 0 ? packet.Address + " " + packet.Direction : $"0x{packet.Bytes[i - 1]:X2}", cell.Data, "data"));
+            result.Add(new(packet, Ack(i), cell.Acknowledge, "ack"));
         }
         result.Add(new(packet, "STOP", new(packet.Span.End, packet.Span.End), "point"));
         return result;

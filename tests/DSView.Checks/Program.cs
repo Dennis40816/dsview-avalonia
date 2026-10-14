@@ -94,4 +94,43 @@ gapVm.SetRange(37000, 38000); gapVm.StepEdge(8, 1); Check((gapVm.Start + gapVm.E
 for (int i = 0; i < issuesVm.Groups.Count; i++) issuesVm.Groups[i] = issuesVm.Groups[i] with { Decoders = [] };
 issuesVm.SetGroup(issuesVm.Groups[1]); issuesVm.LocateIssue(issuesVm.Issues.Single(i => i.Diagnostic.Layer == "DemoFrame"));
 Check(issuesVm.Group.Decoders.Contains("i2c") && issuesVm.Signals.Select(s => s.Id).SequenceEqual(new[] { 0, 1 }) && issuesVm.Groups.Contains(issuesVm.Group), "Locate recreates a usable source Group when customization removed every decoder Group");
+var alternate = await DemoCaptureSource.LoadAsync("timing-gaps");
+Check(alternate.SampleRate == 10_000_000 && alternate.SampleCount == 80_000 && alternate.Gaps.SequenceEqual(new[] { new SourceSpan(40000, 45000) }) && alternate.Signals.Select(s => s.Id).SequenceEqual(Enumerable.Range(0, 32)), "Second embedded capture uses its own rate, duration, missing interval and physical channels");
+var altRead = alternate.Packets.Single(p => p.Id == "alt-read-1");
+Check(altRead.Span == new SourceSpan(10000, 16500) && TimingText.Packet(altRead, alternate.SampleRate).Contains("1 ms") && !TimingText.Packet(altRead, alternate.SampleRate).Contains("200 µs"), "Packet-list timestamps use the active sample rate");
+var altTiming = alternate.MeasureAt(0, 10120);
+Check(altTiming is { High: false, WidthSamples: 50, PeriodSamples: 100 } && altTiming.Pulse == new SourceSpan(10100, 10150) && TimingText.Local(altTiming, alternate.SampleRate).Contains("100 kHz"), "Second capture: low 5 us, period 10 us, 100 kHz from stored samples");
+var altVm = new Workbench(); altVm.Load(alternate); altVm.SetMode(1); altVm.Pick(0, 10100, 0); altVm.Pick(8, 17000, 0);
+Check(altVm.A is { Channel: 0, Sample: 10100 } && altVm.B is { Channel: 8, Sample: 17000 } && altVm.Us(altVm.B.Sample - altVm.A.Sample) == 690 && altVm.PinnedMeasurement == null, "Changed-data cross-channel edge interval is +690 us without a frequency claim");
+altVm.SetMode(1); altVm.Pick(8, 17000, 0); altVm.Pick(0, 10100, 0);
+Check(altVm.Us(altVm.B!.Sample - altVm.A!.Sample) == -690, "Reversing changed-data endpoints preserves signed delay");
+Check(altVm.EditEndpoint(1, 1012.3) && altVm.B is { Sample: 10123, IsEdge: false } && altVm.Hint.Contains("100 ns"), "Changed-rate position editing uses the 100 ns sample grid");
+var altItems = alternate.ProtocolItems(altRead);
+Check(altRead.I2c is { Read: true } && altRead.Address == "0x51" && altRead.Hex == "A5 21 02 78 56 00" && altRead.Value == 0x5678 && altItems.Count == 16 && altItems[1].Span == new SourceSpan(10100, 10900) && altItems[2].Span == new SourceSpan(10900, 11000) && altItems[^2].Span == new SourceSpan(16300, 16400), "Changed I2C direction, bytes and annotation spans come from fixture evidence");
+var altNack = alternate.Packets.Single(p => p.Id == "alt-address-nack");
+Check(altItems[^2].Label == "NACK" && TimingText.I2cStatus(altRead) == "I²C · Read ends with NACK" && altRead.Diagnostics.All(d => d.Layer == "DemoFrame") && altNack.Diagnostics.Single().Layer == "I²C" && altNack.Bytes.Length == 0 && TimingText.I2cStatus(altNack) == "I²C · Address NACK", "Normal final-read NACK and address rejection remain distinct");
+Check(altRead.Diagnostics.Single().Spans.Single() == new SourceSpan(15500, 16300) && altRead.Fields.Single(f => f.Name == "Payload").Spans.SequenceEqual(new[] { new SourceSpan(13700, 14500), new SourceSpan(14600, 15400) }) && altRead.Bytes[..^1].Aggregate(0, (a, b) => a ^ b) == 0xA8, "Changed application field evidence and declared XOR checksum answer agree");
+bool Level(Signal signal, long sample) { int index = signal.LowerBound(sample + 1); return index > 0 ? signal.Edges[index - 1].High : signal.Initial; }
+bool consistentWire = true;
+foreach (var transfer in new[] { altRead, altNack })
+{
+    byte[] expectedBytes = [(byte)(transfer.I2c!.Read ? 0xA3 : 0xA2), .. transfer.Bytes];
+    for (int cell = 0; cell < expectedBytes.Length; cell++)
+    for (int bit = 0; bit < 9; bit++)
+    {
+        long rising = transfer.WireCells[cell].Data.Start + bit * 100 + 50;
+        bool expected = bit == 8 ? transfer.I2c.Acknowledged[cell] == false : (expectedBytes[cell] & (1 << (7 - bit))) != 0;
+        consistentWire &= alternate.Signals[0].Edges.Any(e => e.Sample == rising && e.High) && Level(alternate.Signals[1], rising) == expected;
+    }
+    consistentWire &= Level(alternate.Signals[0], transfer.Span.End) && alternate.Signals[1].Edges.Any(e => e.Sample == transfer.Span.End && e.High);
+}
+Check(consistentWire, "Synthetic fixture consistency: stored SCL rising edges and SDA values match declared bytes, ACKs and STOP");
+Check(alternate.Signals[8].Edges.Select(e => e.Sample).SequenceEqual(new long[] { 9000, 17000, 18000, 47000 }) && alternate.UnknownLevelSpans(alternate.Signals[8]).Single() == new SourceSpan(40000, 47000), "Missing transition is omitted and explicit post-gap transition survives equal observed levels");
+Check(alternate.Activity(8, 45000, 47000) is { Edges: 0, Complete: true, ConstantLevel: null } && alternate.Activity(8, 47001, 80000).ConstantLevel == true && alternate.Activity(9, 45000, 80000).ConstantLevel == null, "Post-gap activity distinguishes unknown level from recovered High");
+Check(alternate.MeasureAt(9, 42000).Reason == "Missing samples at this position" && alternate.MeasureAt(8, 46000).Pulse == null, "Quiet missing samples and unsupported recovery pulse never become valid timing");
+altVm.SetMode(2); altVm.Pick(9, 42000, 0);
+Check(altVm.A is { Sample: 42000, IsEdge: false } && !alternate.HasSample(altVm.A.Sample), "A position inside missing coverage remains a time coordinate, never an observed edge");
+altVm.Search("unmatched prior capture"); altVm.SetTab(true); altVm.Load(capture); altVm.CancelPick(); altVm.Previous();
+Check(altVm.Query == "" && !altVm.PacketsTab && altVm.A == null && altVm.B == null && altVm.SelectedIssue == null && altVm.Start == 0 && altVm.End == 50000 && altVm.Signals[0].Edges.Count == capture.Signals[0].Edges.Count, "Opening another capture clears search, tab, pending picks and history and refreshes source scope");
+Check(alternate.ProtocolItems(altRead with { WireCells = [] }).Count == 1, "Missing detailed timing metadata does not fabricate byte or ACK extents");
 Console.WriteLine($"{passed} focused checks passed.");

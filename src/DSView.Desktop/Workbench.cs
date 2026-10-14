@@ -54,7 +54,7 @@ public sealed class Workbench : ObservableObject
     {
         if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
         Capture = capture; A = B = null; PinnedMeasurement = null; Selected = null; SelectedIssue = null; Issues = capture.Issues; Details = false;
-        editOrigin = null; selectingPair = false; Armed = null; Mode = 0; Hint = ""; history.Clear();
+        editOrigin = null; selectingPair = false; Armed = null; Mode = 0; Hint = ""; Query = ""; PacketsTab = false; history.Clear();
         SetRange(0, capture.SampleCount);
     }
     public void Notify() { OnPropertyChanged(string.Empty); Changed?.Invoke(); }

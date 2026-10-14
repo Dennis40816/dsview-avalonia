@@ -38,6 +38,11 @@ dotnet run --project src/DSView.Desktop --no-build
 dotnet run --project tests/DSView.Checks --no-build
 ```
 
+點上方來源摘要，可切換 **Board bring-up**（50 MS/s）與 **Timing + gaps**（10 MS/s）。
+後者有不同資料與時鐘速度、讀取結束、位址 NACK 及缺資料區間。
+開啟範例會清除分析狀態，保留 Group／線色偏好。
+詳見[離線範例與驗證數值](docs/OFFLINE-EXAMPLES.md)。
+
 先選 Group 或 All signals。指向脈衝可預覽量測，點一下固定結果。
 Measure A/B 依序選兩個參考點；Position 可量指定的取樣位置。
 Esc 取消選點或尚未提交的數值修改。Ctrl＋滾輪縮放，拖曳波形空白處平移。

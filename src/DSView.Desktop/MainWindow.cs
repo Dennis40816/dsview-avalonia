@@ -6,6 +6,7 @@ using Avalonia;
 using Avalonia.Automation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -36,6 +37,8 @@ public sealed class MainWindow : Window
     private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), FontSize = 12, Background = Brushes.Transparent };
     private readonly TextBox search = new() { PlaceholderText = "Search packets, Hex or fields", Margin = new(14, 8) };
     private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton, activityButton, issuesButton;
+    private readonly ScrollViewer waveScroll;
+    private DemoExample activeExample = DemoCaptureSource.Examples[0];
     private readonly Control wavePanel, packetPanel;
     private readonly Border inspectorBorder;
     private readonly GridSplitter splitter = new() { Width = 4, Background = TimelineControl.Ink("#26343F"), ResizeDirection = GridResizeDirection.Columns };
@@ -60,7 +63,7 @@ public sealed class MainWindow : Window
         Add(header, waveTab, 0, 1); Add(header, packetTab, 0, 2);
         var source = Button("", ShowInfo, "flat", "Capture source and acquisition details"); source.Content = status; source.HorizontalAlignment = HorizontalAlignment.Right; Add(header, source, 0, 3);
         issuesButton = Button("Capture issues", ShowIssues, "flat", "Diagnostics across the entire capture, independent of Group and packet search"); issuesButton.Foreground = TimelineControl.Ink("#FF9AAA"); Add(header, issuesButton, 0, 4);
-        reloadButton = Button("Reload demo", async () => await LoadAsync()); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
+        reloadButton = Button("Reload", async () => await LoadAsync(activeExample)); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
         Add(page, Band(header), 0);
         var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto"), Margin = new(16, 0) };
         Add(groupBar, Text("Group", true), 0, 0); groupPicker.Margin = new(10, 0); groupPicker.ItemsSource = Model.Groups; groupPicker.SelectedItem = Model.Group;
@@ -85,9 +88,11 @@ public sealed class MainWindow : Window
         var waveformGrid = new Grid { RowDefinitions = new("42,Auto,*") };
         Add(waveformGrid, ruler, 0);
         var timelineHost = new Grid(); timelineHost.Children.Add(timeline); timelineHost.Children.Add(timeline.LabelControls);
-        Add(waveformGrid, new ScrollViewer { Content = timelineHost, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }, 2);
+        waveScroll = new ScrollViewer { Content = timelineHost, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Add(waveformGrid, waveScroll, 2);
         wavePanel = waveformGrid;
         var packetGrid = new Grid { RowDefinitions = new("Auto,*") }; Add(packetGrid, search, 0); Add(packetGrid, packets, 1); packetPanel = packetGrid;
+        packets.ItemTemplate = new FuncDataTemplate<Packet>((packet, _) => Text(packet == null ? "" : TimingText.Packet(packet, Model.Capture!.SampleRate)));
         search.TextChanged += (_, _) => { if (!updating) Model.Search(search.Text ?? ""); };
         packets.SelectionChanged += (_, _) => { if (!updating && packets.SelectedItem is Packet packet) Model.Select(packet); };
         var work = new Grid(); work.Children.Add(wavePanel); work.Children.Add(packetPanel); Add(workspace, work, 0, 0); Add(workspace, splitter, 0, 1);
@@ -111,7 +116,7 @@ public sealed class MainWindow : Window
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
         hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(waveformGrid, Band(measurement), 1);
         Content = page; Model.Changed += Refresh;
-        Opened += async (_, _) => await LoadAsync(); Closing += (_, _) => { loadCancellation?.Cancel(); SavePreferences(); };
+        Opened += async (_, _) => await LoadAsync(activeExample); Closing += (_, _) => { loadCancellation?.Cancel(); SavePreferences(); };
         KeyDown += (_, e) =>
         {
             if (e.Key != Key.Escape) return;
@@ -121,13 +126,24 @@ public sealed class MainWindow : Window
         Refresh();
     }
     private int SelectedEdgeChannel() => edgeChannel.SelectedItem is string str && int.TryParse(str.AsSpan(1), out var id) ? id : Model.Group.Channels.FirstOrDefault();
-    private async Task LoadAsync()
+    private static string SourceSummary(DemoExample example, Capture capture) => $"Offline · {example.Name} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
+    private async Task LoadAsync(DemoExample example)
     {
         loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new(); int current = ++generation;
-        status.Text = "Loading saved demo…"; reloadButton.IsEnabled = false;
-        try { var capture = await DemoCaptureSource.LoadAsync(loadCancellation.Token); if (current == generation) { Model.Load(capture); status.Text = $"Offline demo · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}"; } }
+        string showing = Model.Capture is { } loaded ? SourceSummary(activeExample, loaded) : "No capture";
+        status.Text = showing + $" · Loading {example.Name}…"; reloadButton.IsEnabled = false;
+        try
+        {
+            var capture = await DemoCaptureSource.LoadAsync(example.Id, loadCancellation.Token);
+            if (current == generation)
+            {
+                renderedPacket = null; renderedIssue = null;
+                Model.Load(capture); activeExample = example; waveScroll.Offset = default;
+                status.Text = SourceSummary(example, capture); ToolTip.SetTip(status, null);
+            }
+        }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { status.Text = "Could not load demo: " + ex.Message; }
+        catch (Exception ex) { if (current == generation) { status.Text = showing + " · Open failed"; ToolTip.SetTip(status, "Current capture retained. " + ex.Message); } }
         finally { if (current == generation) reloadButton.IsEnabled = true; }
     }
     private void Refresh()
@@ -140,6 +156,7 @@ public sealed class MainWindow : Window
             AutomationProperties.SetName(activityButton, $"Activity · {Model.Signals.Count} visible of {Model.Capture?.Signals.Count ?? 0} captured signals");
             issuesButton.Content = $"Capture issues · {Model.Issues.Count}"; issuesButton.IsVisible = Model.Issues.Count > 0;
             range.Text = Model.RangeText;
+            if (search.Text != Model.Query) search.Text = Model.Query;
             var old = edgeChannel.SelectedItem as string; var choices = Model.Group.Channels.Select(c => $"D{c}").ToArray();
             if (!(edgeChannel.ItemsSource?.Cast<string>().SequenceEqual(choices) ?? false)) { edgeChannel.ItemsSource = choices; edgeChannel.SelectedItem = choices.Contains(old) ? old : choices.FirstOrDefault(); }
             wavePanel.IsVisible = !Model.PacketsTab; packetPanel.IsVisible = Model.PacketsTab;
@@ -180,7 +197,7 @@ public sealed class MainWindow : Window
     {
         if (endpoint == null) return name;
         var edge = endpoint.IsEdge ? Model.Capture?.Signals.First(s => s.Id == endpoint.Channel).Nearest(endpoint.Sample) : null;
-        return $"{name} · D{endpoint.Channel} {(edge == null ? "position" : edge.High ? "↑" : "↓")}" + (Model.Group.Channels.Contains(endpoint.Channel) ? "" : " (hidden)");
+        return $"{name} · D{endpoint.Channel} {(edge == null ? "position" : edge.High ? "↑" : "↓")}" + (Model.Capture?.HasSample(endpoint.Sample) == false ? " (missing samples)" : "") + (Model.Group.Channels.Contains(endpoint.Channel) ? "" : " (hidden)");
     }
     private void CommitTime(int index, TextBox box)
     {
@@ -202,8 +219,11 @@ public sealed class MainWindow : Window
         inspector.Children.Add(Text($"{Model.Us(packet.Span.Start):0.##}–{Model.Us(packet.Span.End):0.##} µs", true));
         packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
         inspector.Children.Add(Text(packet.Address + (packet.I2c is { } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
-        inspector.Children.Add(Text("Data bytes · Hex", true));
-        inspector.Children.Add(new TextBlock { Text = packet.Hex, FontFamily = new("Cascadia Mono,Consolas"), FontSize = 15, TextWrapping = TextWrapping.Wrap });
+        if (packet.Bytes.Length > 0)
+        {
+            inspector.Children.Add(Text("Data bytes · Hex", true));
+            inspector.Children.Add(new TextBlock { Text = packet.Hex, FontFamily = new("Cascadia Mono,Consolas"), FontSize = 15, TextWrapping = TextWrapping.Wrap });
+        }
         if (packet.Fields.Count > 0)
         {
             inspector.Children.Add(new Separator()); inspector.Children.Add(Text("DemoFrame fields", true));
@@ -226,7 +246,7 @@ public sealed class MainWindow : Window
             diagnostic.Children.Add(Button("Locate issue", () => Model.LocateIssue(issue), "flat", "Locate the diagnostic evidence, preserving timing markers"));
             inspector.Children.Add(new Border { Child = diagnostic, Padding = new(12), Background = TimelineControl.Ink("#40232D"), BorderBrush = TimelineControl.Ink("#FF9AAA"), BorderThickness = new(ReferenceEquals(Model.SelectedIssue, issue) ? 1 : 0) });
         }
-        if (packet.I2c is { } bus) inspector.Children.Add(Text(bus.Acknowledged.Count == packet.Bytes.Length + 1 && bus.Acknowledged.All(a => a == true) ? "I²C · Address + data ACK" : "I²C · Inspect ACK / NACK evidence", true));
+        if (packet.I2c != null) { var busText = Text(TimingText.I2cStatus(packet), true); busText.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(busText); }
         inspector.Children.Add(Button("Locate source", Model.Locate));
     }
     private void ShowActivity()
@@ -314,8 +334,26 @@ public sealed class MainWindow : Window
     }
     private async void ShowInfo()
     {
-        var dialog = new Window { Title = "Saved demo", Width = 430, Height = 270, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-        dialog.Content = new StackPanel { Margin = new(22), Spacing = 18, Children = { Text("Offline sample capture"), new TextBlock { Text = "32 channels · 50 MS/s · 1 ms\n\nWaveforms and decoded records are bundled synthetic data. Native hardware acquisition and live decoding are not connected in this development build.", TextWrapping = TextWrapping.Wrap }, Button("Close", dialog.Close) } }; await dialog.ShowDialog(this);
+        if (Model.Capture is not { } capture) return;
+        var dialog = new Window { Title = "Capture source", Width = 540, Height = 530, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        var body = new StackPanel { Margin = new(22), Spacing = 14 };
+        body.Children.Add(Text("Current capture · " + activeExample.Name));
+        body.Children.Add(Text($"{capture.Signals.Count} channels · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}"));
+        body.Children.Add(new TextBlock { Text = "Synthetic waveforms and precomputed annotations. Hardware acquisition and raw protocol decoding are not connected.", TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
+        if (capture.Gaps.Count == 0) body.Children.Add(Text("Coverage · no missing intervals", true));
+        foreach (var gap in capture.Gaps)
+        {
+            var row = Row(); row.Children.Add(Text($"Missing samples · {TimingText.Duration(gap.Start / (double)capture.SampleRate)}–{TimingText.Duration(gap.End / (double)capture.SampleRate)}", true));
+            row.Children.Add(Button("Show interval", () => { dialog.Close(); Model.Remember(); Model.SetTab(false); double pad = gap.End - gap.Start; Model.SetRange(gap.Start - pad, gap.End + pad); }, "flat", "Locate this missing-data interval while preserving measurements")); body.Children.Add(row);
+        }
+        body.Children.Add(new Separator()); body.Children.Add(Text("Offline example"));
+        var picker = new ComboBox { ItemsSource = DemoCaptureSource.Examples, SelectedItem = activeExample, HorizontalAlignment = HorizontalAlignment.Stretch };
+        AutomationProperties.SetName(picker, "Offline example"); body.Children.Add(picker);
+        var description = new TextBlock { Text = activeExample.Description, TextWrapping = TextWrapping.Wrap }; body.Children.Add(description);
+        picker.SelectionChanged += (_, _) => { if (picker.SelectedItem is DemoExample selected) description.Text = selected.Description; };
+        body.Children.Add(new TextBlock { Text = "Opening an example clears measurements, selection and search. Your Groups and waveform colors are kept.", TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
+        var actions = Row(); actions.Children.Add(Button("Close", dialog.Close)); actions.Children.Add(Button("Open example", async () => { var selected = picker.SelectedItem as DemoExample ?? activeExample; dialog.Close(); await LoadAsync(selected); }, "primary")); body.Children.Add(actions);
+        dialog.Content = new ScrollViewer { Content = body }; await dialog.ShowDialog(this);
     }
     private void RestorePreferences()
     {
