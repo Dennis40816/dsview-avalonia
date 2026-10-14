@@ -37,6 +37,10 @@ public sealed class MainWindow : Window
     private readonly Grid workspace = new() { ColumnDefinitions = new("*,0,0") };
     private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), FontSize = 12, Background = Brushes.Transparent };
     private readonly TextBox search = new() { PlaceholderText = "Search packets, Hex or fields", Margin = new(14, 8) };
+    private readonly StackPanel packetEmpty = new() { Spacing = 12, Margin = new(24, 28), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
+    private readonly TextBlock packetEmptyText = Text("");
+    private readonly Button packetEmptyAction;
+    private PacketEmptyReason packetEmptyReason;
     private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton, activityButton, issuesButton;
     private readonly ScrollViewer waveScroll;
     private DemoExample activeExample = DemoCaptureSource.Examples[0];
@@ -98,6 +102,9 @@ public sealed class MainWindow : Window
         Add(waveformGrid, waveScroll, 2);
         wavePanel = waveformGrid;
         var packetGrid = new Grid { RowDefinitions = new("Auto,*") }; Add(packetGrid, search, 0); Add(packetGrid, packets, 1); packetPanel = packetGrid;
+        packetEmptyText.TextWrapping = TextWrapping.Wrap; packetEmptyText.MaxWidth = 420;
+        packetEmptyAction = Button("", RecoverPackets, "flat"); packetEmptyAction.HorizontalAlignment = HorizontalAlignment.Left;
+        packetEmpty.Children.Add(packetEmptyText); packetEmpty.Children.Add(packetEmptyAction); Add(packetGrid, packetEmpty, 1);
         packets.ItemTemplate = new FuncDataTemplate<Packet>((packet, _) => Text(packet == null ? "" : TimingText.Packet(packet, Model.Capture!.SampleRate)));
         search.TextChanged += (_, _) => { if (!updating) Model.Search(search.Text ?? ""); };
         packets.SelectionChanged += (_, _) => { if (!updating && packets.SelectedItem is Packet packet) Model.Select(packet); };
@@ -142,6 +149,7 @@ public sealed class MainWindow : Window
         loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new(); int current = ++generation;
         string showing = Model.Capture is { } loaded ? SourceSummary(activeExample, loaded) : "No capture";
         status.Text = showing + $" · Loading {example.Name}…"; reloadButton.IsEnabled = false;
+        if (packetEmptyReason == PacketEmptyReason.NoCapture) packetEmptyAction.IsEnabled = false;
         try
         {
             var capture = await DemoCaptureSource.LoadAsync(example.Id, loadCancellation.Token);
@@ -154,7 +162,7 @@ public sealed class MainWindow : Window
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (current == generation) { status.Text = showing + " · Open failed"; ToolTip.SetTip(status, "Current capture retained. " + ex.Message); } }
-        finally { if (current == generation) reloadButton.IsEnabled = true; }
+        finally { if (current == generation) { reloadButton.IsEnabled = true; packetEmptyAction.IsEnabled = true; } }
     }
     private void Refresh()
     {
@@ -172,7 +180,23 @@ public sealed class MainWindow : Window
             wavePanel.IsVisible = !Model.PacketsTab; packetPanel.IsVisible = Model.PacketsTab;
             navigation.IsVisible = overview.IsVisible = measureButton.IsVisible = !Model.PacketsTab;
             waveTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#9BAEBF") : TimelineControl.Ink("#78D7C8"); packetTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#78D7C8") : TimelineControl.Ink("#9BAEBF");
-            if (Model.PacketsTab) { var values = Model.Packets.ToArray(); if (!(packets.ItemsSource?.Cast<Packet>().SequenceEqual(values) ?? false)) packets.ItemsSource = values; packets.SelectedItem = Model.Selected; }
+            if (Model.PacketsTab)
+            {
+                var view = Model.PacketView(); var values = view.Items;
+                if (!(packets.ItemsSource?.Cast<Packet>().SequenceEqual(values) ?? false)) packets.ItemsSource = values;
+                packets.SelectedItem = values.Any(p => ReferenceEquals(p, Model.Selected)) ? Model.Selected : null;
+                packetEmptyReason = view.EmptyReason; packetEmpty.IsVisible = view.EmptyReason != PacketEmptyReason.None; packets.IsVisible = !packetEmpty.IsVisible;
+                packetEmptyAction.IsEnabled = view.EmptyReason != PacketEmptyReason.NoCapture || reloadButton.IsEnabled;
+                search.IsVisible = view.EmptyReason is not (PacketEmptyReason.NoCapture or PacketEmptyReason.NoRecords);
+                (packetEmptyText.Text, packetEmptyAction.Content) = view.EmptyReason switch
+                {
+                    PacketEmptyReason.NoCapture => ("No capture loaded.", "Reload"),
+                    PacketEmptyReason.NoRecords => ("No decoded packets in this capture.", "View waveforms"),
+                    PacketEmptyReason.Group => ("No packets in this Group.", "Show all packets"),
+                    PacketEmptyReason.Search => ("No packets match this search.", "Clear search"),
+                    _ => ("", "")
+                };
+            }
             if ((Model.A == null && Model.B == null) || (Model.Mode == 0 && Model.PinnedMeasurement != null && Model.Armed == null)) ResetNumericErrors();
             modePicker.SelectedIndex = Model.Mode == 2 ? 1 : 0; hint.Text = invalidTimes.Values.FirstOrDefault(value => value.Length > 0) ?? Model.Hint; hint.IsVisible = !string.IsNullOrEmpty(hint.Text);
             bool hasMarkers = Model.A != null || Model.B != null;
@@ -182,8 +206,8 @@ public sealed class MainWindow : Window
             measurementActions.Children[1].IsVisible = Model.Armed != null;
             measurementActions.Children[2].IsVisible = Model.Armed == null && Model.A != null && Model.B != null;
             measurementActions.Children[3].IsVisible = hasMarkers || hint.IsVisible;
-            if (!aTime.IsFocused && !invalidTimes.ContainsKey(aTime)) aTime.Text = Model.A == null ? "" : Model.Us(Model.A.Sample).ToString("0.###", CultureInfo.InvariantCulture);
-            if (!bTime.IsFocused && !invalidTimes.ContainsKey(bTime)) bTime.Text = Model.B == null ? "" : Model.Us(Model.B.Sample).ToString("0.###", CultureInfo.InvariantCulture);
+            if (!aTime.IsFocused && !invalidTimes.ContainsKey(aTime)) aTime.Text = Model.A == null ? "" : TimeAxis.Microseconds(Model.A.Sample, Model.Capture!.SampleRate);
+            if (!bTime.IsFocused && !invalidTimes.ContainsKey(bTime)) bTime.Text = Model.B == null ? "" : TimeAxis.Microseconds(Model.B.Sample, Model.Capture!.SampleRate);
             aTime.IsEnabled = Model.A != null; bTime.IsEnabled = Model.B != null;
             aSource.Text = EndpointLabel(Model.A, "A"); bSource.Text = EndpointLabel(Model.B, "B");
             string localSource = Model.PinnedMeasurement is { } pinned ? $"D{pinned.Channel} {Model.Capture?.Signals.FirstOrDefault(s => s.Id == pinned.Channel)?.Name}" : "A/B";
@@ -199,10 +223,24 @@ public sealed class MainWindow : Window
             if (!showDetails) { workspace.ColumnDefinitions[1].Width = new(0); workspace.ColumnDefinitions[2].Width = new(0); }
             inspectorBorder.IsVisible = splitter.IsVisible = showDetails; detailButton.IsVisible = Model.Selected != null && !showDetails;
             if (showDetails && (!ReferenceEquals(renderedPacket, Model.Selected) || !ReferenceEquals(renderedIssue, Model.SelectedIssue))) { RenderInspector(); renderedPacket = Model.Selected; renderedIssue = Model.SelectedIssue; }
-            packetContext.Text = !Model.SelectionInGroup ? "Source signals are outside this group" : Model.Selected is { } p && (p.Span.End < Model.Start || p.Span.Start > Model.End) ? "Source is outside the time view" : "";
-            packetContext.IsVisible = !Model.PacketsTab && !string.IsNullOrEmpty(packetContext.Text);
+            packetContext.Text = Model.PacketSelectionContext;
+            packetContext.IsVisible = !string.IsNullOrEmpty(packetContext.Text);
         }
         finally { updating = false; }
+    }
+    private async void RecoverPackets()
+    {
+        switch (packetEmptyReason)
+        {
+            case PacketEmptyReason.NoCapture:
+                if (!reloadButton.IsEnabled) return;
+                int requested = generation + 1; await LoadAsync(activeExample);
+                if (generation == requested && Model.Capture != null && !Model.PacketsTab) waveTab.Focus();
+                break;
+            case PacketEmptyReason.NoRecords: Model.SetTab(false); waveTab.Focus(); break;
+            case PacketEmptyReason.Group: Model.ShowAllPackets(); search.Focus(); break;
+            case PacketEmptyReason.Search: Model.Search(""); search.Focus(); break;
+        }
     }
     private string EndpointLabel(Endpoint? endpoint, string name)
     {
@@ -215,8 +253,8 @@ public sealed class MainWindow : Window
         if (updating || !box.IsEnabled) return;
         invalidTimes.TryGetValue(box, out var priorError);
         invalidTimes[box] = "";
-        bool parsed = double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value);
-        if (!parsed || !Model.EditEndpoint(index, value))
+        bool parsed = decimal.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value);
+        if (!parsed || !Model.EditEndpointTime(index, value))
         {
             box.BorderBrush = TimelineControl.Ink("#FF9AAA");
             invalidTimes[box] = parsed ? Model.Hint : "Enter a numeric time in µs. Esc restores the current endpoint.";
@@ -225,7 +263,7 @@ public sealed class MainWindow : Window
         }
         invalidTimes.Remove(box); box.ClearValue(BorderBrushProperty);
         if (!string.IsNullOrEmpty(priorError)) Model.ClearMeasurementError(priorError);
-        var point = index == 0 ? Model.A : Model.B; box.Text = point == null ? "" : Model.Us(point.Sample).ToString("0.###", CultureInfo.InvariantCulture);
+        var point = index == 0 ? Model.A : Model.B; box.Text = point == null ? "" : TimeAxis.Microseconds(point.Sample, Model.Capture!.SampleRate);
         Refresh();
     }
     private void ResetNumericErrors() { invalidTimes.Clear(); aTime.ClearValue(BorderBrushProperty); bTime.ClearValue(BorderBrushProperty); }
@@ -233,15 +271,15 @@ public sealed class MainWindow : Window
     {
         ResetNumericErrors();
         Model.CancelPick();
-        aTime.Text = Model.A == null ? "" : Model.Us(Model.A.Sample).ToString("0.###", CultureInfo.InvariantCulture);
-        bTime.Text = Model.B == null ? "" : Model.Us(Model.B.Sample).ToString("0.###", CultureInfo.InvariantCulture);
+        aTime.Text = Model.A == null ? "" : TimeAxis.Microseconds(Model.A.Sample, Model.Capture!.SampleRate);
+        bTime.Text = Model.B == null ? "" : TimeAxis.Microseconds(Model.B.Sample, Model.Capture!.SampleRate);
     }
     private void RenderInspector()
     {
         inspector.Children.Clear(); var packet = Model.Selected!;
         var heading = new Grid { ColumnDefinitions = new("*,Auto") }; Add(heading, Text(packet.Decoder.ToUpperInvariant() + " / " + packet.Id, true), 0, 0); Add(heading, Button("×", Model.ToggleDetails, "flat", "Close packet details"), 0, 1); inspector.Children.Add(heading);
         var title = Text(packet.Title); title.FontSize = 15; title.FontWeight = FontWeight.SemiBold; title.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(title);
-        inspector.Children.Add(Text($"{Model.Us(packet.Span.Start):0.##}–{Model.Us(packet.Span.End):0.##} µs", true));
+        inspector.Children.Add(Text(TimeAxis.FormatRange(packet.Span.Start, packet.Span.End, Model.Capture!.SampleRate), true));
         packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
         inspector.Children.Add(Text(packet.Address + (packet.I2c is { } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
         if (packet.Bytes.Length > 0)
@@ -304,7 +342,7 @@ public sealed class MainWindow : Window
             var row = new StackPanel { Spacing = 5 };
             var label = Text(issue.Diagnostic.Layer + " · " + issue.Diagnostic.Message); label.TextWrapping = TextWrapping.Wrap; row.Children.Add(label);
             var span = issue.Diagnostic.Spans.FirstOrDefault() ?? issue.Packet.Span;
-            row.Children.Add(Text($"{issue.Packet.Id} · {Model.Us(span.Start):0.##}–{Model.Us(span.End):0.##} µs · " + (issue.Diagnostic.Field ?? "annotated interval"), true));
+            row.Children.Add(Text($"{issue.Packet.Id} · {TimeAxis.FormatRange(span.Start, span.End, Model.Capture!.SampleRate)} · " + (issue.Diagnostic.Field ?? "annotated interval"), true));
             var locate = Button("Locate issue", () => Model.LocateIssue(issue), "flat"); AutomationProperties.SetName(locate, $"Locate issue {issue.Diagnostic.Layer} {issue.Diagnostic.Message}"); row.Children.Add(locate); rows.Children.Add(row);
         }
         body.Children.Add(new ScrollViewer { Content = rows, MaxHeight = 360 }); openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(issuesButton);

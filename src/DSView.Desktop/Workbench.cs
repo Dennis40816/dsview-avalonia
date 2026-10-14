@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Dennis40816
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DSView.Domain;
 
@@ -48,10 +49,24 @@ public sealed class Workbench : ObservableObject
     public IReadOnlyList<Signal> Signals { get { CacheScope(); return cachedSignals; } }
     public IReadOnlyList<Decoder> Decoders { get { CacheScope(); return cachedDecoders; } }
     public bool IsAllSignals => Group.Name == "All signals";
-    public IEnumerable<Packet> Packets => (Capture?.Packets ?? []).Where(p => (IsAllSignals || Group.Decoders.Contains(p.Decoder)) && (string.IsNullOrWhiteSpace(Query) || $"{p.Id} {p.Hex} {p.Address} {p.Title} {p.Error} 0x{p.Value:X}".Contains(Query, StringComparison.OrdinalIgnoreCase)));
+    private bool InPacketScope(Packet packet) => IsAllSignals || Group.Decoders.Contains(packet.Decoder);
+    private bool MatchesSearch(Packet packet) => string.IsNullOrWhiteSpace(Query) || $"{packet.Id} {packet.Hex} {packet.Address} {packet.Title} {packet.Error} 0x{packet.Value:X}".Contains(Query, StringComparison.OrdinalIgnoreCase);
+    public IEnumerable<Packet> Packets => (Capture?.Packets ?? []).Where(p => InPacketScope(p) && MatchesSearch(p));
+    public PacketView PacketView()
+    {
+        if (Capture == null) return new([], PacketEmptyReason.NoCapture);
+        if (Capture.Packets.Count == 0) return new([], PacketEmptyReason.NoRecords);
+        var scoped = Capture.Packets.Where(InPacketScope).ToArray();
+        if (scoped.Length == 0) return new([], PacketEmptyReason.Group);
+        var matches = scoped.Where(MatchesSearch).ToArray();
+        return new(matches, matches.Length == 0 ? PacketEmptyReason.Search : PacketEmptyReason.None);
+    }
     public bool SelectionInGroup => Selected == null || IsAllSignals || Group.Decoders.Contains(Selected.Decoder);
+    public string PacketSelectionContext => Selected == null ? "" : !SelectionInGroup ? "Selected packet is outside this Group."
+        : PacketsTab && !MatchesSearch(Selected) ? "Selected packet is outside this search."
+        : !PacketsTab && (Selected.Span.End < Start || Selected.Span.Start > End) ? "Source is outside the time view." : "";
     public double Us(double sample) => sample / (Capture?.SampleRate ?? 50_000_000) * 1_000_000;
-    public string RangeText => $"{Us(Start):0.##}–{Us(End):0.##} µs";
+    public string RangeText => TimeAxis.FormatRange(Start, End, Capture?.SampleRate ?? 50_000_000);
     public void Load(Capture capture)
     {
         if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
@@ -62,6 +77,7 @@ public sealed class Workbench : ObservableObject
     public void Notify() { OnPropertyChanged(string.Empty); Changed?.Invoke(); }
     public void SetGroup(ObservationGroup group) { Group = group; if (Probe != null && !group.Channels.Contains(Probe.Channel)) Probe = null; if (!SelectionInGroup) Details = false; Notify(); }
     public void ShowAll() { PacketsTab = false; SetGroup(Groups.First(g => g.Name == "All signals")); }
+    public void ShowAllPackets() { Query = ""; PacketsTab = true; SetGroup(Groups.First(g => g.Name == "All signals")); }
     public void Select(Packet packet) { Selected = packet; SelectedIssue = null; Details = true; Notify(); }
     public void ShowSignal(int channel)
     {
@@ -209,10 +225,17 @@ public sealed class Workbench : ObservableObject
     }
     public bool EditEndpoint(int index, double microseconds)
     {
+        if (decimal.TryParse(microseconds.ToString("R", CultureInfo.InvariantCulture), NumberStyles.Float, CultureInfo.InvariantCulture, out var time)) return EditEndpointTime(index, time);
+        MeasurementError("Enter a finite numeric time in µs."); return false;
+    }
+    public bool EditEndpointTime(int index, decimal microseconds)
+    {
         var old = index == 0 ? A : B;
         if (old == null || Capture == null) return false;
-        if (!double.IsFinite(microseconds) || microseconds < 0 || microseconds > Us(Capture.SampleCount - 1)) { MeasurementError($"Enter a time from 0 to {Us(Capture.SampleCount - 1):0.###} µs."); return false; }
-        var sample = Capture.ToSample(microseconds);
+        string maximumText = TimeAxis.Microseconds(Capture.SampleCount - 1, Capture.SampleRate);
+        decimal maximum = Math.Max((Capture.SampleCount - 1) * 1_000_000m / Capture.SampleRate, decimal.Parse(maximumText, CultureInfo.InvariantCulture));
+        if (microseconds < 0 || microseconds > maximum) { MeasurementError($"Enter a time from 0 to {maximumText} µs."); return false; }
+        var sample = (long)decimal.Round(microseconds * Capture.SampleRate / 1_000_000m);
         if (sample == old.Sample) return true;
         editOrigin = null; selectingPair = draggingEndpoint = false; Armed = null;
         var point = old with { Sample = sample, IsEdge = false };

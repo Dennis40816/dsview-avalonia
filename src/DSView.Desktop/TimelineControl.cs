@@ -172,17 +172,23 @@ public sealed class TimelineControl : Control
         if (model.Capture == null) { Label(context, "Loading saved demo…", 18, 16, Muted); return; }
         if (overview) { DrawOverview(context); return; }
         hits.Clear(); issueHits.Clear();
-        var spanUs = model.Us(model.End - model.Start);
-        var rough = spanUs / Math.Max(2, PlotWidth / 110);
-        var power = Math.Pow(10, Math.Floor(Math.Log10(rough)));
-        var tickUs = new[] { 1d, 2, 5, 10 }.First(n => n * power >= rough) * power;
-        if (rulerOnly) Label(context, "Time · µs", 16, 13, Muted, 12);
-        for (double tick = Math.Ceiling(model.Us(model.Start) / tickUs) * tickUs; tick <= model.Us(model.End); tick += tickUs)
+        var axis = TimeAxis.Create(model.Start, model.End, model.Capture.SampleRate, PlotWidth);
+        if (rulerOnly)
         {
-            var x = X(tick * model.Capture.SampleRate / 1_000_000);
+            Label(context, (axis.OriginText == null ? "Time · " : "Offset · ") + axis.Unit, 16, axis.OriginText == null ? 13 : 3, Muted, 12);
+            if (axis.OriginText != null) Label(context, "from " + axis.OriginText, 16, 21, Muted, 10);
+        }
+        double labelRight = LabelWidth - 12;
+        foreach (var tick in axis.Ticks)
+        {
+            var x = X(tick.Sample);
             context.DrawLine(new Pen(GridInk, 1), new(x, rulerOnly ? 36 : 0), new(x, Height));
-            var str = tick.ToString("0.###", CultureInfo.InvariantCulture);
-            if (rulerOnly) Label(context, str, Math.Clamp(x - 10, LabelWidth, Bounds.Width - 55), 13, Muted, 12);
+            if (!rulerOnly) continue;
+            var text = Format(tick.Label, Muted, 12);
+            if (text.Width > PlotWidth) continue;
+            double left = Math.Clamp(x - text.Width / 2, LabelWidth, LabelWidth + PlotWidth - text.Width);
+            if (left < labelRight + 12) continue;
+            context.DrawText(text, new(left, 13)); labelRight = left + text.Width;
         }
         if (rulerOnly) { DrawMarker(context, model.A, "A", false); DrawMarker(context, model.B, "B", true); return; }
         foreach (var (decoder, index) in model.Decoders.Select((d, i) => (d, i)))

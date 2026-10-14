@@ -215,5 +215,6 @@ Check(partition.Runs.Select((r, i) => r.First.Sample == (long)decimal.Ceiling(i 
 var denseCapture = await DemoCaptureSource.LoadAsync("dense-signals");
 Check(denseCapture.Signals.Count == 32 && denseCapture.Signals.Sum(s => s.Edges.Count) == 1_048_576 && denseCapture.SampleCount == 6_000_000 && denseCapture.Packets.Count == 0, "Dense native example has 32 physical channels and 1048576 independent stored transitions");
 Check(denseCapture.MeasureAt(0, 192) is { WidthSamples: 64, PeriodSamples: 128 } && denseCapture.MeasureAt(31, 1_004_200) is { WidthSamples: 124, PeriodSamples: 248 }, "Dense example timing remains source-based at both ends of the channel list");
+ClarityChecks.Run(Check, capture, denseCapture);
 if (args.Contains("--performance")) WorkScaling.Run(Check);
 Console.WriteLine($"{passed} focused checks passed.");

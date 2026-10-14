@@ -7,7 +7,11 @@ namespace DSView.Desktop;
 
 public static class TimingText
 {
-    private static string Number(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+    private static string Number(double value)
+    {
+        string text = value.ToString("0.###", CultureInfo.InvariantCulture);
+        return text == "-0" ? "0" : text;
+    }
     public static string Duration(double seconds) => Math.Abs(seconds) < 1e-6 && seconds != 0
         ? Number(seconds * 1e9) + " ns" : Math.Abs(seconds) < 1e-3
         ? Number(seconds * 1e6) + " µs" : Math.Abs(seconds) < 1

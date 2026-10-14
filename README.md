@@ -57,6 +57,13 @@ transitions. Picking and timing use the original samples, independently of the
 display's detail level. See [waveform rendering](docs/WAVEFORM-RENDERING.md) for
 the implementation and optional operation-count checks.
 
+The ruler uses ns, µs, ms or s for the current span. Fine views far from the
+capture start show an explicit time origin and relative ticks. A/B entry remains
+in µs as labeled, so zooming never changes the meaning of a typed value.
+An empty Packets view explains whether the capture has no records, the Group
+has no packets, or the search has no matches. Filtered-out selections remain
+available in the inspector with their scope identified.
+
 Start with a Group or All signals. Hover a pulse to preview timing; click to pin
 it. Use Measure A/B to choose two references, or choose Position for sample-grid
 locations. Escape cancels a pending selection or numeric edit. Ctrl + wheel
@@ -80,6 +87,8 @@ locally; measurements and capture sessions are not yet saved.
 Windows native interaction has been exercised. Other desktop platforms, the
 full DPI matrix and large-recording performance still need validation. The
 synthetic fixture cannot validate actual device timing or decoder correctness.
+The current adaptive ruler and packet empty states have focused numerical/state
+checks; their native layout and keyboard recovery still need verification.
 
 Before binary distribution, the project must resolve upstream source and notice
 gaps, determine the actual build and runtime dependencies, and produce a software

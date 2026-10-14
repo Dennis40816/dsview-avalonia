@@ -35,6 +35,20 @@ Activity counts subtract the union of overlapping missing intervals, and edge
 navigation jumps over whole missing intervals instead of walking their edges.
 The Group overview queries observed transition counts in exact sample bins.
 
+## Time labels
+
+`TimeAxis` chooses a shared unit from the viewport span and produces bounded
+1/2/5 ticks. Fine views at large absolute times declare an origin and use
+relative labels. The native renderer measures label widths and omits collisions;
+tick positions still use the common sample-to-X projection.
+
+Integer and fractional parts are converted separately to avoid losing integer
+sample digits through direct double/decimal conversion. Endpoint input is parsed
+and rounded using decimal arithmetic in explicit microseconds. Neither path
+parses display labels to obtain waveform coordinates. The viewport itself still
+uses doubles: these changes do not establish individual-sample precision above
+2^53 samples or complete long-recording support.
+
 ## Correctness and work scaling
 
 Run the default focused checks after a build:

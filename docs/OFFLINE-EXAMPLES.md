@@ -25,6 +25,21 @@ level after the gap remains unknown until an observed transition establishes
 it. A position within missing coverage is a time coordinate, not an observed
 edge; its endpoint label identifies missing samples.
 
+## Reading time and packet scope
+
+The ruler chooses one unit for its visible span. At fine zoom far from time
+zero, **Offset** ticks are relative to the explicitly labeled **from** time.
+For example, `1 s + (10–210 ns)` means absolute times 1.000000010 through
+1.000000210 seconds. A/B entry fields always use µs and commit to sample indices;
+their units do not follow zoom. Formatted ruler text is never used for picking.
+
+Packets searches the selected Group over the full recording, independently of
+the waveform viewport. No decoded records, no packets in the Group, and no
+search matches have distinct explanations. **Show all packets** explicitly
+clears the Group and search restrictions; **Clear search** retains the Group.
+These actions preserve measurements and the retained packet/diagnostic selection.
+The inspector identifies a selected packet excluded by the current filters.
+
 ## Fixture representation
 
 The embedded JSON files declare `sampleRate` in samples/second and `sampleCount`.
