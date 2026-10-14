@@ -16,7 +16,7 @@ using DSView.Infrastructure;
 
 namespace DSView.Desktop;
 
-public sealed class MainWindow : Window
+public sealed partial class MainWindow : Window
 {
     public Workbench Model { get; } = new();
     private readonly ComboBox groupPicker = new() { MinWidth = 205 };
@@ -75,7 +75,8 @@ public sealed class MainWindow : Window
         Add(header, waveTab, 0, 1); Add(header, packetTab, 0, 2);
         var source = Button("", ShowInfo, "flat", "Capture source and acquisition details"); source.Content = status; source.HorizontalAlignment = HorizontalAlignment.Right; Add(header, source, 0, 3);
         issuesButton = Button("Capture issues", ShowIssues, "flat", "Diagnostics across the entire capture, independent of Group and packet search"); issuesButton.Foreground = TimelineControl.Ink("#FF9AAA"); Add(header, issuesButton, 0, 4);
-        reloadButton = Button("Reload", async () => await LoadAsync(activeExample)); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
+        reloadButton = Button("File ▾", ShowFiles, tip: "Open or save an analysis"); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
+        status.MaxWidth = 380; status.TextTrimming = TextTrimming.CharacterEllipsis;
         Add(page, Band(header), 0);
         var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto"), Margin = new(16, 0) };
         Add(groupBar, Text("Group", true), 0, 0); groupPicker.Margin = new(10, 0); groupPicker.ItemsSource = Model.Groups; groupPicker.SelectedItem = Model.Group;
@@ -90,6 +91,7 @@ public sealed class MainWindow : Window
         Add(nav, Button("−", () => Model.Zoom(1.5), "flat", "Zoom out"), 0, 2); Add(nav, Button("+", () => Model.Zoom(1 / 1.5), "flat", "Zoom in"), 0, 3);
         range.Margin = new(14, 0); Add(nav, range, 0, 4); Add(nav, Text("Edges", true), 0, 5);
         edgeChannel.Margin = new(8, 0, 4, 0); ToolTip.SetTip(edgeChannel, "Signal for previous / next edge"); AutomationProperties.SetName(edgeChannel, "Edge navigation signal"); Add(nav, edgeChannel, 0, 6);
+        edgeChannel.SelectionChanged += (_, _) => { if (!updating) ScheduleTitleUpdate(); };
         previousEdgeButton = Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge");
         nextEdgeButton = Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge");
         Add(nav, previousEdgeButton, 0, 7); Add(nav, nextEdgeButton, 0, 8);
@@ -108,7 +110,7 @@ public sealed class MainWindow : Window
         Add(waveformGrid, ruler, 0);
         var timelineHost = new Grid(); timelineHost.Children.Add(timeline); timelineHost.Children.Add(timeline.LabelControls);
         waveScroll = new ScrollViewer { Content = timelineHost, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        waveScroll.ScrollChanged += (_, _) => { timeline.SetViewport(waveScroll.Offset.Y, waveScroll.Viewport.Height); UpdateMeasurementContext(); };
+        waveScroll.ScrollChanged += (_, _) => { timeline.SetViewport(waveScroll.Offset.Y, waveScroll.Viewport.Height); UpdateMeasurementContext(); ScheduleTitleUpdate(); };
         Add(waveformGrid, waveScroll, 2);
         waveEmptyText.TextWrapping = TextWrapping.Wrap; waveEmptyText.MaxWidth = 420;
         waveEmptyAction = Button("", () =>
@@ -157,9 +159,16 @@ public sealed class MainWindow : Window
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
         hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(waveformGrid, Band(measurement), 1);
         Content = page; Model.Changed += Refresh;
-        Opened += async (_, _) => await LoadAsync(activeExample); Closing += (_, _) => { loadCancellation?.Cancel(); SavePreferences(); };
+        Model.Changed += ScheduleTitleUpdate;
+        titleUpdate.Tick += (_, _) => { titleUpdate.Stop(); UpdateAnalysisTitle(); };
+        aTime.TextChanged += (_, _) => ScheduleTitleUpdate(); bTime.TextChanged += (_, _) => ScheduleTitleUpdate();
+        Opened += async (_, _) => await LoadAsync(activeExample); Closing += ClosingAnalysis;
+        Closed += (_, _) => { titleUpdate.Stop(); loadCancellation?.Cancel(); ++generation; };
         KeyDown += (_, e) =>
         {
+            if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.O) { e.Handled = true; _ = OpenAnalysisAsync(); return; }
+            if (e.Key == Key.S && (e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift)))
+            { e.Handled = true; _ = SaveAnalysisAsync(e.KeyModifiers.HasFlag(KeyModifiers.Shift)); return; }
             if (e.Key != Key.Escape) return;
             if (Model.Armed != null || aTime.IsFocused || bTime.IsFocused) { CancelEditing(); e.Handled = true; }
             else if (Model.Details) Model.ToggleDetails();
@@ -168,12 +177,13 @@ public sealed class MainWindow : Window
     }
     private int SelectedEdgeChannel() => edgeChannel.SelectedItem is string str && int.TryParse(str.AsSpan(1), out var id) ? id : Model.Group.Channels.FirstOrDefault();
     private void UpdateRulerWidth() => ruler.Width = Model.Signals.Count > 0 ? timeline.Bounds.Width : wavePanel.Bounds.Width;
-    private static string SourceSummary(DemoExample example, Capture capture) => $"Offline · {example.Name} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
+    private string SourceSummary(Capture capture) => $"{(analysisPath == null ? "Offline · " + activeExample.Name : "Saved analysis · " + Path.GetFileName(analysisPath))} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
     private async Task LoadAsync(DemoExample example)
     {
+        if (fileBusy || !await ConfirmReplacementAsync()) return;
         loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new(); int current = ++generation;
-        string showing = Model.Capture is { } loaded ? SourceSummary(activeExample, loaded) : "No capture";
-        status.Text = showing + $" · Loading {example.Name}…"; reloadButton.IsEnabled = false;
+        string showing = Model.Capture is { } loaded ? SourceSummary(loaded) : "No capture";
+        status.Text = showing + $" · Loading {example.Name}…"; fileBusy = true; SetOpening(true);
         if (packetEmptyReason == PacketEmptyReason.NoCapture) packetEmptyAction.IsEnabled = false;
         try
         {
@@ -181,13 +191,15 @@ public sealed class MainWindow : Window
             if (current == generation)
             {
                 renderedPacket = null; renderedIssue = null; ResetNumericErrors();
+                RestorePersonalSettings(); analysisPath = null; sessionSourceName = "";
                 Model.Load(capture); activeExample = example; waveScroll.Offset = default;
-                status.Text = SourceSummary(example, capture); ToolTip.SetTip(status, null);
+                baselineCapture = capture; baselineState = AnalysisFile.StateKey(CurrentAnalysisState());
+                UpdateSourceIdentity();
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { if (current == generation) { status.Text = showing + " · Open failed"; ToolTip.SetTip(status, "Current capture retained. " + ex.Message); } }
-        finally { if (current == generation) { reloadButton.IsEnabled = true; packetEmptyAction.IsEnabled = true; } }
+        catch (Exception ex) { if (current == generation) await FileMessageAsync("Open failed", "Current analysis was kept.\n" + ex.Message); }
+        finally { if (current == generation) { fileBusy = false; SetOpening(false); packetEmptyAction.IsEnabled = true; UpdateSourceIdentity(); } }
     }
     private void Refresh()
     {
@@ -226,7 +238,7 @@ public sealed class MainWindow : Window
                 search.IsVisible = view.EmptyReason is not (PacketEmptyReason.NoCapture or PacketEmptyReason.NoRecords);
                 (packetEmptyText.Text, packetEmptyAction.Content) = view.EmptyReason switch
                 {
-                    PacketEmptyReason.NoCapture => ("No capture loaded.", "Reload"),
+                    PacketEmptyReason.NoCapture => ("No capture loaded.", "Open analysis"),
                     PacketEmptyReason.NoRecords => ("No decoded packets in this capture.", "View waveforms"),
                     PacketEmptyReason.Group => ("No packets in this Group.", "Show all packets"),
                     PacketEmptyReason.Search => ("No packets match this search.", "Clear search"),
@@ -295,9 +307,7 @@ public sealed class MainWindow : Window
         switch (packetEmptyReason)
         {
             case PacketEmptyReason.NoCapture:
-                if (!reloadButton.IsEnabled) return;
-                int requested = generation + 1; await LoadAsync(activeExample);
-                if (generation == requested && Model.Capture != null && !Model.PacketsTab) waveTab.Focus();
+                await OpenAnalysisAsync();
                 break;
             case PacketEmptyReason.NoRecords: Model.SetTab(false); waveTab.Focus(); break;
             case PacketEmptyReason.Group: Model.ShowAllPackets(); search.Focus(); break;
@@ -488,11 +498,13 @@ public sealed class MainWindow : Window
     }
     private async void ShowInfo()
     {
+        if (fileBusy) return;
         if (Model.Capture is not { } capture) return;
         var dialog = new Window { Title = "Capture source", Width = 540, Height = 530, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var body = new StackPanel { Margin = new(22), Spacing = 14 };
-        body.Children.Add(Text("Current capture · " + activeExample.Name));
+        body.Children.Add(new TextBlock { Text = "Current capture · " + (analysisPath == null ? activeExample.Name : Path.GetFileName(analysisPath)), TextWrapping = TextWrapping.Wrap });
         body.Children.Add(Text($"{capture.Signals.Count} channels · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}"));
+        if (analysisPath != null) body.Children.Add(new TextBlock { Text = "Saved analysis · " + sessionSourceName + ". Decoded results are saved snapshots; opening does not run a decoder.", TextWrapping = TextWrapping.Wrap });
         body.Children.Add(new TextBlock { Text = capture.SourceDescription, TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
         if (capture.Gaps.Count == 0) body.Children.Add(Text("Coverage · no missing intervals", true));
         foreach (var gap in capture.Gaps)
@@ -505,7 +517,7 @@ public sealed class MainWindow : Window
         AutomationProperties.SetName(picker, "Offline example"); body.Children.Add(picker);
         var description = new TextBlock { Text = activeExample.Description, TextWrapping = TextWrapping.Wrap }; body.Children.Add(description);
         picker.SelectionChanged += (_, _) => { if (picker.SelectedItem is DemoExample selected) description.Text = selected.Description; };
-        body.Children.Add(new TextBlock { Text = "Opening an example clears measurements, selection and search. Your Groups and waveform colors are kept.", TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
+        body.Children.Add(new TextBlock { Text = "Opening an example clears measurements, selection and search. " + (analysisPath == null ? "Your Groups and waveform colors are kept." : "Your default Groups and waveform colors will return."), TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
         var actions = Row(); actions.Children.Add(Button("Close", dialog.Close)); actions.Children.Add(Button("Open example", async () => { var selected = picker.SelectedItem as DemoExample ?? activeExample; dialog.Close(); await LoadAsync(selected); }, "primary")); body.Children.Add(actions);
         dialog.Content = new ScrollViewer { Content = body }; await dialog.ShowDialog(this);
     }
@@ -524,7 +536,7 @@ public sealed class MainWindow : Window
     }
     private void SavePreferences()
     {
-        try { Directory.CreateDirectory(Path.GetDirectoryName(preferencePath)!); var temp = preferencePath + ".tmp"; File.WriteAllText(temp, JsonSerializer.Serialize(new Preferences(1, Model.Group.Name, Model.Groups.Where(g => g.Name != "All signals").ToArray(), Model.Colors), new JsonSerializerOptions { WriteIndented = true })); File.Move(temp, preferencePath, true); }
+        try { Directory.CreateDirectory(Path.GetDirectoryName(preferencePath)!); var temp = preferencePath + ".tmp"; File.WriteAllText(temp, JsonSerializer.Serialize(personalPreferences ?? CurrentPreferences(), new JsonSerializerOptions { WriteIndented = true })); File.Move(temp, preferencePath, true); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { status.Text = "Settings could not be saved: " + ex.Message; }
     }
     private sealed record Preferences(int Version, string ActiveGroup, ObservationGroup[] Groups, Dictionary<int, string> Colors);

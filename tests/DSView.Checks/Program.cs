@@ -218,6 +218,7 @@ Check(denseCapture.MeasureAt(0, 192) is { WidthSamples: 64, PeriodSamples: 128 }
 ClarityChecks.Run(Check, capture, denseCapture);
 GroupEditingChecks.Run(Check, capture);
 MeasurementRecoveryChecks.Run(Check, denseCapture);
+await AnalysisFileChecks.RunAsync(Check, capture, denseCapture);
 int nativeOption = Array.IndexOf(args, "--native-i2c");
 if (nativeOption >= 0 && nativeOption + 1 >= args.Length) throw new ArgumentException("--native-i2c requires a configuration path.");
 await RawDecodeChecks.Run(Check, nativeOption < 0 ? null : args[nativeOption + 1]);

@@ -13,7 +13,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 目前已有可執行的原生 Avalonia **離線工作區**，預設範例使用合成波形及預先產生的解析資料。
 選用的開發用 I²C 來源會呼叫外部 native decoder，解析其生成的原始 samples。
-尚未接硬體擷取、擷取檔匯入及分析工作階段保存／還原。
+可用自含 `.dsview2` 分析檔保存原始 samples、解析快照與工作狀態。
+尚未接硬體擷取及其他廠牌擷取檔格式。
 **授權清查尚未完成，目前不提供 binary 發行。**
 
 已提供一次一個 Group、全部通道、自訂波形線色、Hex 封包內容、高／低脈寬、完整局部週期／頻率，以及跨通道 A/B edge／位置量測。
@@ -38,6 +39,14 @@ dotnet run --project src/DSView.Desktop --no-build
 ```sh
 dotnet run --project tests/DSView.Checks --no-build
 ```
+
+File → Save analysis（Ctrl+S）保存分析，Open analysis（Ctrl+O）重新開啟，
+Save as 使用 Ctrl+Shift+S。標題的星號表示目前工作尚未保存；關閉或換來源時可保存、捨棄或取消。
+正在選取或輸入的量測需先完成／取消。失敗或取消不會取代舊檔。
+
+分析檔保留 Group、波形色、A/B、封包／異常選取、搜尋、時間範圍與垂直來源位置。
+局部量測會依保存的 samples 重算。開檔顯示已保存的解析結果，不重跑 decoder，也不需要外部 native worker。
+檔案內的 Group／顏色不會覆蓋個人預設。限制詳見 [分析檔格式](docs/ANALYSIS-FILES.md)。
 
 點上方來源摘要，可選 **Board bring-up**（50 MS/s）、**Timing + gaps**（10 MS/s）
 或 **Dense signals**（50 MS/s）。Timing + gaps 有不同資料與時鐘速度、讀取結束、

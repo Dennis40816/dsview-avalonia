@@ -139,6 +139,14 @@ public sealed class TimelineControl : Control
     }
     public RowVisibility SourceVisibility(int channel) => SourceRow(channel) is { } row
         ? SignalViewport.Visibility(row, visibleTop, visibleBottom - visibleTop) : RowVisibility.Visible;
+    public ViewAnchor SaveAnchor(double offset)
+    {
+        if (offset < SignalsTop || model.Signals.Count == 0) return new(null, Math.Min(offset, SignalsTop));
+        int index = Math.Clamp((int)((offset - SignalsTop) / RowHeight), 0, model.Signals.Count - 1);
+        return new(model.Signals[index].Id, Math.Clamp(offset - SignalsTop - index * RowHeight, 0, RowHeight - .001));
+    }
+    public double RestoreAnchor(ViewAnchor anchor, double height, double extent) =>
+        Math.Clamp(anchor.Channel is int channel && SourceRow(channel) is { } row ? row.Top + anchor.Offset : anchor.Offset, 0, Math.Max(0, extent - height));
     public double RevealOffset(IReadOnlyList<int> channels, double offset, double height, double extent) =>
         SignalViewport.RevealOffset(channels.Select(SourceRow).OfType<SignalRow>().ToArray(), offset, height, extent);
     public void SetViewport(double top, double height)

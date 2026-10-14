@@ -15,8 +15,9 @@ DSView's acquisition and decoding libraries.
 A runnable native Avalonia **offline workbench** is available for development.
 The default examples use bundled synthetic waveforms and precomputed protocol
 records. An optional development I²C source runs an external native decoder on
-its generated raw samples. Hardware acquisition, capture-file import and
-analysis-session save/restore are not connected.
+its generated raw samples. Self-contained `.dsview2` analysis files preserve
+samples, decoded snapshots and the working view. Hardware acquisition and
+other capture formats are not connected.
 **License clearance is incomplete; no binary releases yet.**
 
 The workbench supports one signal Group at a time, all-channel navigation,
@@ -45,6 +46,19 @@ Focused numerical and state checks:
 ```sh
 dotnet run --project tests/DSView.Checks --no-build
 ```
+
+Use **File → Save analysis** (Ctrl+S) to retain the capture and current analysis;
+**Open analysis** (Ctrl+O) restores it. Save as uses Ctrl+Shift+S. A title asterisk
+means the view or analysis has changed. Closing, reloading or opening another
+source offers Save / Discard / Cancel. Finish or cancel a pending measurement
+edit before saving. Failed or cancelled saves retain the previous file.
+
+Saved files include exact raw transitions, gaps, protocol/field/diagnostic
+snapshots, Groups, waveform colors, A/B, selection, search, time view and vertical
+source anchor. Local timing is recomputed from saved samples. Opening does not
+run a decoder or require the optional native worker. Saved-analysis Groups and
+colors are local to that document; returning to an example restores personal
+defaults. See [analysis files and limits](docs/ANALYSIS-FILES.md).
 
 Open the capture source button in the header to choose **Board bring-up**
 (50 MS/s), **Timing + gaps** (10 MS/s), or **Dense signals** (50 MS/s).

@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DSView.Domain;
+using DSView.Infrastructure;
 
 namespace DSView.Desktop;
 
@@ -40,6 +41,45 @@ public sealed class Workbench : ObservableObject
     private readonly Stack<(double Start, double End, ObservationGroup Group)> history = new();
     public event Action? Changed;
     public Workbench() => Group = Groups[0];
+    public bool HasPendingEdit => editOrigin != null || Armed != null || draggingEndpoint;
+    public AnalysisState SnapshotState(ViewAnchor vertical, int? edgeChannel)
+    {
+        var committed = editOrigin ?? (A, B, Mode, PinnedMeasurement);
+        return new(Groups.Where(g => g.Name != "All signals").Select(g => new ObservationGroup(g.Name, g.Channels.ToArray(), g.Decoders.ToArray())).ToArray(),
+            Group.Name, Colors.OrderBy(c => c.Key).ToDictionary(), Start, End, committed.Item1, committed.Item2, committed.Item3, committed.Item4 != null,
+            Selected?.Id, SelectedIssue?.Diagnostic.Id, Details && Selected != null, PacketsTab, Query, vertical, edgeChannel);
+    }
+    public void RestoreAnalysis(AnalysisDocument document)
+    {
+        AnalysisFile.Validate(document);
+        ApplyAnalysis(PrepareValidatedAnalysis(document));
+    }
+    internal sealed record PreparedAnalysis(AnalysisDocument Document, IReadOnlyList<CaptureIssue> Issues,
+        Packet? Selected, CaptureIssue? Issue, LocalMeasurement? Local, ObservationGroup[] Groups);
+    // Used only after AnalysisFile.ReadAsync has validated the entire file on a worker.
+    internal static PreparedAnalysis PrepareValidatedAnalysis(AnalysisDocument document)
+    {
+        var state = document.State; var capture = document.Capture; var issues = capture.Issues;
+        var selected = capture.Packets.FirstOrDefault(p => p.Id == state.SelectedPacket);
+        var issue = issues.FirstOrDefault(i => ReferenceEquals(i.Packet, selected) && i.Diagnostic.Id == state.SelectedIssue);
+        var local = state.LocalPulse ? capture.MeasureAt(state.A!.Channel, state.A.Sample) : null;
+        var groups = state.Groups.Select(g => new ObservationGroup(g.Name, g.Channels.ToArray(), g.Decoders.ToArray()))
+            .Append(new ObservationGroup("All signals", Enumerable.Range(0, 32).ToArray(), [])).ToArray();
+        return new(document, issues, selected, issue, local, groups);
+    }
+    internal void ApplyAnalysis(PreparedAnalysis prepared)
+    {
+        var state = prepared.Document.State; var capture = prepared.Document.Capture;
+        var groups = prepared.Groups;
+        Capture = capture; Groups.Clear(); foreach (var group in groups) Groups.Add(group);
+        Group = Groups.Single(g => g.Name == state.ActiveGroup);
+        Colors.Clear(); foreach (var pair in state.Colors) Colors.Add(pair.Key, pair.Value);
+        A = state.A; B = state.B; Mode = state.Mode; PinnedMeasurement = prepared.Local;
+        Selected = prepared.Selected; Issues = prepared.Issues; SelectedIssue = prepared.Issue; Details = state.Details;
+        PacketsTab = state.PacketsTab; Query = state.Query; Start = state.Start; End = state.End;
+        Probe = null; Armed = null; editOrigin = null; selectingPair = draggingEndpoint = false; Hint = ""; history.Clear();
+        Notify();
+    }
     private void CacheScope()
     {
         if (ReferenceEquals(cachedCapture, Capture) && ReferenceEquals(cachedGroup, Group)) return;
