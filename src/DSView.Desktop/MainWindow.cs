@@ -32,6 +32,7 @@ public sealed class MainWindow : Window
     private readonly StackPanel waveEmpty = new() { Spacing = 12, Margin = new(24, 28), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
     private readonly Button waveEmptyAction, previousEdgeButton, nextEdgeButton;
     private readonly List<Button> endpointPickButtons = [];
+    private readonly List<Button> endpointShowButtons = [];
     private readonly WrapPanel endpoints = new() { Orientation = Orientation.Horizontal };
     private readonly StackPanel inspector = new() { Spacing = 14, Margin = new Thickness(16) };
     private readonly StackPanel measurement = new() { Spacing = 6, Margin = new(16, 4) };
@@ -54,6 +55,7 @@ public sealed class MainWindow : Window
     private readonly GridSplitter splitter = new() { Width = 4, Background = TimelineControl.Ink("#26343F"), ResizeDirection = GridResizeDirection.Columns };
     private CancellationTokenSource? loadCancellation;
     private int generation;
+    private int revealGeneration;
     private bool updating;
     private Packet? renderedPacket;
     private CaptureIssue? renderedIssue;
@@ -96,7 +98,8 @@ public sealed class MainWindow : Window
         timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
         timeline.EditingCancelled += CancelEditing;
         timeline.KeyboardModeChanged += enabled => guide.Text = enabled ? "↑↓ signal · ←→ edge / sample · Enter select · Esc cancel" : "Hover to measure · Ctrl + wheel to zoom";
-        Model.SignalFocusRequested += channel => Dispatcher.UIThread.Post(() => timeline.RevealSignal(channel), DispatcherPriority.Loaded);
+        Model.SignalFocusRequested += channel => QueueSignalReveal([channel]);
+        Model.MeasurementFocusRequested += QueueSignalReveal;
         ruler = new TimelineControl(Model, isRuler: true) { HorizontalAlignment = HorizontalAlignment.Left };
         ruler.EndpointRequested += index => { if (Model.Signals.Count > 0) { Model.Arm(index); timeline.FocusForPick(); } };
         ruler.EditingCancelled += CancelEditing;
@@ -105,7 +108,7 @@ public sealed class MainWindow : Window
         Add(waveformGrid, ruler, 0);
         var timelineHost = new Grid(); timelineHost.Children.Add(timeline); timelineHost.Children.Add(timeline.LabelControls);
         waveScroll = new ScrollViewer { Content = timelineHost, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-        waveScroll.ScrollChanged += (_, _) => timeline.SetViewport(waveScroll.Offset.Y, waveScroll.Viewport.Height);
+        waveScroll.ScrollChanged += (_, _) => { timeline.SetViewport(waveScroll.Offset.Y, waveScroll.Viewport.Height); UpdateMeasurementContext(); };
         Add(waveformGrid, waveScroll, 2);
         waveEmptyText.TextWrapping = TextWrapping.Wrap; waveEmptyText.MaxWidth = 420;
         waveEmptyAction = Button("", () =>
@@ -132,12 +135,16 @@ public sealed class MainWindow : Window
         delta.Foreground = TimelineControl.Ink("#C9F1EA"); delta.FontFamily = new("Cascadia Mono,Consolas"); delta.FontSize = 14; delta.TextWrapping = TextWrapping.Wrap; Add(result, delta, 0, 1);
         measurementActions.Spacing = 6; measurementActions.Margin = new(8, 0, 0, 0);
         measurementActions.Children.Add(modePicker); measurementActions.Children.Add(Button("Cancel", CancelEditing, "flat"));
-        measurementActions.Children.Add(Button("Fit", Model.FitMarkers, "flat", "Show both measurement endpoints")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat", "Clear measurement")); Add(result, measurementActions, 0, 2);
+        measurementActions.Children.Add(Button("Fit", Model.FitMarkers, "flat", "Fit A/B time span and reveal source rows when they fit")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat", "Clear measurement")); Add(result, measurementActions, 0, 2);
         modePicker.SelectionChanged += (_, _) => { if (!updating) Model.SetSnapMode(modePicker.SelectedIndex == 1 ? 2 : 1); };
         foreach (var (label, box, index) in new[] { (aSource, aTime, 0), (bSource, bTime, 1) })
         {
             var endpoint = new Grid { ColumnDefinitions = new("100,95,Auto,Auto"), Width = 308, Margin = new(0, 0, 16, 0) };
-            label.TextWrapping = TextWrapping.Wrap; label.Margin = new(0, 0, 8, 0); Add(endpoint, label, 0, 0); Add(endpoint, box, 0, 1);
+            box.VerticalAlignment = VerticalAlignment.Center;
+            var endpointSource = new StackPanel(); label.TextWrapping = TextWrapping.Wrap; label.Margin = new(0, 0, 8, 0); endpointSource.Children.Add(label);
+            var show = Button(index == 0 ? "Show A" : "Show B", () => { Model.ShowEndpoint(index); waveTab.Focus(); }, "flat", "Reveal this endpoint without changing its value");
+            show.HorizontalAlignment = HorizontalAlignment.Left; endpointSource.Children.Add(show); endpointShowButtons.Add(show);
+            Add(endpoint, endpointSource, 0, 0); Add(endpoint, box, 0, 1);
             var units = Text("µs", true); units.Margin = new(8, 0, 4, 0); Add(endpoint, units, 0, 2);
             var choose = Button("Choose", () => { Model.Arm(index); timeline.FocusForPick(); }, "flat", "Replace only this endpoint");
             endpointPickButtons.Add(choose);
@@ -184,6 +191,8 @@ public sealed class MainWindow : Window
     }
     private void Refresh()
     {
+        // Any subsequent model/edit refresh supersedes a queued navigation request.
+        ++revealGeneration;
         if (updating) return; updating = true;
         try
         {
@@ -236,11 +245,7 @@ public sealed class MainWindow : Window
             if (!aTime.IsFocused && !invalidTimes.ContainsKey(aTime)) aTime.Text = Model.A == null ? "" : TimeAxis.Microseconds(Model.A.Sample, Model.Capture!.SampleRate);
             if (!bTime.IsFocused && !invalidTimes.ContainsKey(bTime)) bTime.Text = Model.B == null ? "" : TimeAxis.Microseconds(Model.B.Sample, Model.Capture!.SampleRate);
             aTime.IsEnabled = Model.A != null; bTime.IsEnabled = Model.B != null;
-            aSource.Text = EndpointLabel(Model.A, "A"); bSource.Text = EndpointLabel(Model.B, "B");
-            string localSource = Model.PinnedMeasurement is { } pinned ? $"D{pinned.Channel} {Model.Capture?.Signals.FirstOrDefault(s => s.Id == pinned.Channel)?.Name}" : "A/B";
-            string measurementContext = Model.PinnedMeasurement is { } pm ? !Model.Group.Channels.Contains(pm.Channel) ? "Outside group" : pm.Pulse is { } span && (span.End < Model.Start || span.Start > Model.End) ? "Outside time view" : "" : "";
-            measurementTitle.Text = Model.Armed != null ? "Measure A/B" : !hasMarkers ? "Measurement" : measurementContext.Length > 0 ? $"Pinned · D{Model.PinnedMeasurement!.Channel}\n{measurementContext}" : "Pinned · " + localSource;
-            ToolTip.SetTip(measurementTitle, Model.Armed != null ? Model.Hint : !hasMarkers ? "No pinned measurement" : "Pinned · " + localSource + (measurementContext.Length > 0 ? " · " + measurementContext : ""));
+            UpdateMeasurementContext();
             delta.Text = Model.Armed is int armed ? $"Choose {(armed == 0 ? "A" : "B")} · {(Model.Mode == 2 ? "position" : "edge")}" : Model.PinnedMeasurement is { } local && Model.Capture is { } capture ? TimingText.Local(local, capture.SampleRate)
                 : Model.A == null || Model.B == null ? "A/B measurement" : $"B − A   {(Model.B.Sample > Model.A.Sample ? "+" : "")}{TimingText.Duration((Model.B.Sample - Model.A.Sample) / (double)Model.Capture!.SampleRate)}";
             ToolTip.SetTip(delta, Model.Armed != null ? Model.Hint : Model.PinnedMeasurement is { } m ? $"Local measurement · pulse samples {m.Pulse?.Start}–{m.Pulse?.End}\n" + (m.Cycle is { } cycle ? $"Cycle samples {cycle.Start}–{cycle.End}. This is a local cycle, not a capture-wide frequency." : m.Reason) : "Signed interval between A and B");
@@ -254,6 +259,36 @@ public sealed class MainWindow : Window
             packetContext.IsVisible = !string.IsNullOrEmpty(packetContext.Text);
         }
         finally { updating = false; }
+    }
+    private void QueueSignalReveal(IReadOnlyList<int> channels)
+    {
+        var capture = Model.Capture; var group = Model.Group; int request = ++revealGeneration;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (request != revealGeneration || !ReferenceEquals(capture, Model.Capture) || !ReferenceEquals(group, Model.Group) || Model.PacketsTab) return;
+            double offset = timeline.RevealOffset(channels, waveScroll.Offset.Y, waveScroll.Viewport.Height, waveScroll.Extent.Height);
+            waveScroll.Offset = new Vector(waveScroll.Offset.X, offset);
+            timeline.SetViewport(waveScroll.Offset.Y, waveScroll.Viewport.Height);
+            UpdateMeasurementContext();
+        }, DispatcherPriority.Loaded);
+    }
+    private string VerticalContext(int channel) => timeline.SourceVisibility(channel) switch
+    {
+        RowVisibility.Above => "Source above",
+        RowVisibility.Below => "Source below",
+        _ => ""
+    };
+    private void UpdateMeasurementContext()
+    {
+        if (endpointShowButtons.Count != 2) return;
+        aSource.Text = EndpointLabel(Model.A, "A"); bSource.Text = EndpointLabel(Model.B, "B");
+        foreach (var (point, button) in new[] { (Model.A, endpointShowButtons[0]), (Model.B, endpointShowButtons[1]) })
+            button.IsVisible = point != null && (!Model.Group.Channels.Contains(point.Channel) || point.Sample < Model.Start || point.Sample > Model.End || VerticalContext(point.Channel).Length > 0);
+        bool hasMarkers = Model.A != null || Model.B != null;
+        string localSource = Model.PinnedMeasurement is { } pinned ? $"D{pinned.Channel} {Model.Capture?.Signals.FirstOrDefault(s => s.Id == pinned.Channel)?.Name}" : "A/B";
+        string context = Model.PinnedMeasurement is { } pm ? !Model.Group.Channels.Contains(pm.Channel) ? "Outside group" : pm.Pulse is { } span && (span.End < Model.Start || span.Start > Model.End) ? "Outside time view" : VerticalContext(pm.Channel) : "";
+        measurementTitle.Text = Model.Armed != null ? "Measure A/B" : !hasMarkers ? "Measurement" : context.Length > 0 ? $"Pinned · D{Model.PinnedMeasurement!.Channel}\n{context}" : "Pinned · " + localSource;
+        ToolTip.SetTip(measurementTitle, Model.Armed != null ? Model.Hint : !hasMarkers ? "No pinned measurement" : "Pinned · " + localSource + (context.Length > 0 ? " · " + context : ""));
     }
     private async void RecoverPackets()
     {
@@ -273,7 +308,8 @@ public sealed class MainWindow : Window
     {
         if (endpoint == null) return name;
         var edge = endpoint.IsEdge ? Model.Capture?.Signals.First(s => s.Id == endpoint.Channel).Nearest(endpoint.Sample) : null;
-        return $"{name} · D{endpoint.Channel} {(edge == null ? "position" : edge.High ? "↑" : "↓")}" + (Model.Capture?.HasSample(endpoint.Sample) == false ? "\nMissing samples" : "") + (Model.Group.Channels.Contains(endpoint.Channel) ? "" : "\nHidden signal") + (endpoint.Sample < Model.Start || endpoint.Sample > Model.End ? "\nOutside view" : "");
+        string vertical = Model.Group.Channels.Contains(endpoint.Channel) ? VerticalContext(endpoint.Channel) : "";
+        return $"{name} · D{endpoint.Channel} {(edge == null ? "position" : edge.High ? "↑" : "↓")}" + (Model.Capture?.HasSample(endpoint.Sample) == false ? "\nMissing samples" : "") + (Model.Group.Channels.Contains(endpoint.Channel) ? "" : "\nHidden signal") + (endpoint.Sample < Model.Start || endpoint.Sample > Model.End ? "\nOutside view" : "") + (vertical.Length > 0 ? "\n" + vertical : "");
     }
     private void CommitTime(int index, TextBox box)
     {

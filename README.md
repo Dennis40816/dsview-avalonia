@@ -58,8 +58,10 @@ Group has no captured signals, loading chooses a compatible Group. See
 If a manually selected Group has no signals in the current capture, the waveform
 area explains the empty state and offers **Show all signals**. Edge navigation
 and new picking are disabled until signals are visible. Existing measurements
-remain available; **Fit** recovers both endpoints, or **Show all signals** restores
-the captured rows without changing the time range.
+remain available; **Fit** frames the endpoint times and reveals their source rows
+when both fit vertically. If the rows are too far apart, it reveals A and offers
+**Show B** beside the offscreen endpoint. **Show A/B** preserves endpoint values;
+**Show all signals** restores captured rows without changing the time range.
 
 The Group editor offers signals captured by the current source and compatible
 decoder tracks. Existing members absent from this capture remain listed as saved

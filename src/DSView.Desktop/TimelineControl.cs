@@ -132,7 +132,15 @@ public sealed class TimelineControl : Control
             Canvas.SetTop(item.Activity, SignalsTop + index * RowHeight + 29);
         }
     }
-    public void RevealSignal(int channel) { if (colorButtons.TryGetValue(channel, out var item)) item.Button.BringIntoView(); }
+    private SignalRow? SourceRow(int channel)
+    {
+        int index = model.Signals.ToList().FindIndex(s => s.Id == channel);
+        return index < 0 ? null : new(SignalsTop + index * RowHeight, SignalsTop + (index + 1) * RowHeight);
+    }
+    public RowVisibility SourceVisibility(int channel) => SourceRow(channel) is { } row
+        ? SignalViewport.Visibility(row, visibleTop, visibleBottom - visibleTop) : RowVisibility.Visible;
+    public double RevealOffset(IReadOnlyList<int> channels, double offset, double height, double extent) =>
+        SignalViewport.RevealOffset(channels.Select(SourceRow).OfType<SignalRow>().ToArray(), offset, height, extent);
     public void SetViewport(double top, double height)
     {
         if (height <= 0) return;

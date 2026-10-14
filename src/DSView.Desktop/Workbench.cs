@@ -25,6 +25,7 @@ public sealed class Workbench : ObservableObject
     public CaptureIssue? SelectedIssue { get; private set; }
     public IReadOnlyList<CaptureIssue> Issues { get; private set; } = [];
     public event Action<int>? SignalFocusRequested;
+    public event Action<IReadOnlyList<int>>? MeasurementFocusRequested;
     public bool Details { get; private set; }
     public bool PacketsTab { get; private set; }
     public string Hint { get; private set; } = "";
@@ -152,8 +153,9 @@ public sealed class Workbench : ObservableObject
     public void FocusProbe()
     {
         if (Capture == null || Signals.Count == 0) { Probe = null; return; }
-        if (Probe is { } existing && Signals.Any(s => s.Id == existing.Channel) && existing.Sample >= Start && existing.Sample <= End) return;
-        PlaceProbe(Signals[0], (long)Math.Round((Start + End) / 2)); Notify();
+        if (Probe is { } existing && Signals.Any(s => s.Id == existing.Channel) && existing.Sample >= Start && existing.Sample <= End)
+        { SignalFocusRequested?.Invoke(existing.Channel); return; }
+        PlaceProbe(Signals[0], (long)Math.Round((Start + End) / 2)); Notify(); SignalFocusRequested?.Invoke(Probe!.Channel);
     }
     private void PlaceProbe(Signal signal, long sample)
     {
@@ -178,7 +180,7 @@ public sealed class Workbench : ObservableObject
             {
                 var signal = Signals.First(s => s.Id == Probe.Channel);
                 var edge = timeDirection > 0 ? Capture.ObservedEdgeAtOrAfter(signal, Probe.Sample + 1) : Capture.ObservedEdgeBefore(signal, Probe.Sample);
-                if (edge == null) { Hint = "No further observed edge on this signal."; Notify(); return; }
+                if (edge == null) { Hint = "No further observed edge on this signal."; Notify(); SignalFocusRequested?.Invoke(Probe.Channel); return; }
                 Probe = new(signal.Id, edge.Sample, true);
             }
             if (Probe.Sample < Start || Probe.Sample > End)
@@ -191,13 +193,14 @@ public sealed class Workbench : ObservableObject
     public void CommitProbe()
     {
         FocusProbe(); if (Probe is not { } probe) return;
-        if (Armed != null) Pick(probe.Channel, probe.Sample, 0);
+        if (Armed != null) { Pick(probe.Channel, probe.Sample, 0); SignalFocusRequested?.Invoke(probe.Channel); }
         else
         {
             var local = Capture!.MeasureAt(probe.Channel, probe.Sample);
-            if (local.Pulse is not { } pulse) { MeasurementError($"D{probe.Channel} · {local.Reason}."); return; }
+            if (local.Pulse is not { } pulse) { MeasurementError($"D{probe.Channel} · {local.Reason}."); SignalFocusRequested?.Invoke(probe.Channel); return; }
             A = new(probe.Channel, pulse.Start, true); B = new(probe.Channel, pulse.End, true); PinnedMeasurement = local;
             Mode = 0; editOrigin = null; selectingPair = draggingEndpoint = false; Hint = ""; Notify();
+            MeasurementFocusRequested?.Invoke([probe.Channel]);
         }
     }
     public void Pick(int channel, long sample, double tolerance, int? replacing = null)
@@ -209,7 +212,7 @@ public sealed class Workbench : ObservableObject
             var measurement = Capture!.MeasureAt(channel, sample);
             if (measurement.Pulse is not { } pulse) { Hint = $"D{channel} · {measurement.Reason}."; Notify(); return; }
             PinnedMeasurement = measurement; A = new(channel, pulse.Start, true); B = new(channel, pulse.End, true);
-            editOrigin = null; Hint = ""; Notify(); return;
+            editOrigin = null; Hint = ""; Notify(); MeasurementFocusRequested?.Invoke([channel]); return;
         }
         int? target = replacing ?? Armed;
         if (target == null) { Hint = "Choose A or B to replace an endpoint, or drag an existing cursor."; Notify(); return; }
@@ -250,6 +253,23 @@ public sealed class Workbench : ObservableObject
         Remember(); Group = Groups.FirstOrDefault(g => g.Channels.Contains(A.Channel) && g.Channels.Contains(B.Channel)) ?? Groups[^1];
         var first = Math.Min(A.Sample, B.Sample); var last = Math.Max(A.Sample, B.Sample); var pad = Math.Max(5, (last - first) * .15);
         PacketsTab = false; SetRange(first - pad, last + pad);
+        MeasurementFocusRequested?.Invoke(new[] { A.Channel, B.Channel }.Distinct().ToArray());
+    }
+    public void ShowEndpoint(int index)
+    {
+        var point = index == 0 ? A : index == 1 ? B : null;
+        if (point == null || Capture?.Signals.Any(s => s.Id == point.Channel) != true) return;
+        if (!Group.Channels.Contains(point.Channel) || point.Sample < Start || point.Sample > End) Remember();
+        if (!Group.Channels.Contains(point.Channel))
+            Group = Groups.First(g => g.Channels.Contains(point.Channel));
+        PacketsTab = false;
+        if (point.Sample < Start || point.Sample > End)
+        {
+            double half = (End - Start) / 2;
+            SetRange(point.Sample - half, point.Sample + half);
+        }
+        else Notify();
+        SignalFocusRequested?.Invoke(point.Channel);
     }
     public void StepEdge(int channel, int direction)
     {

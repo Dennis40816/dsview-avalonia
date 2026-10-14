@@ -47,8 +47,9 @@ transition，沒有解析封包。
 詳見[離線範例與驗證數值](docs/OFFLINE-EXAMPLES.md)。
 
 手動選到沒有目前擷取訊號的 Group 時，波形區會說明原因並提供 **Show all signals**。
-沒有可見訊號時，edge 導覽與新選點操作會停用。既有量測保留；**Fit** 可找回兩個端點，
-或用 **Show all signals** 恢復已擷取通道並維持目前時間範圍。
+沒有可見訊號時，edge 導覽與新選點操作會停用。既有量測保留；**Fit** 放大端點時間範圍，
+並在垂直空間足夠時顯示兩個來源通道。通道相距太遠時先顯示 A，在畫面外的端點旁提供 **Show B**。
+**Show A/B** 不改變端點數值；**Show all signals** 恢復已擷取通道並維持目前時間範圍。
 
 Group 編輯器提供這次已擷取的訊號與來源相符的 decoder tracks；已保存但這次未擷取的成員會另外列出並保留。
 編輯 **All signals** 會用這次的訊號建立另一個 Group。Group 只改變觀察範圍，勾選 decoder track 不會啟動擷取或解析。
