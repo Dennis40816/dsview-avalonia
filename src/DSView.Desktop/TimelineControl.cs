@@ -34,6 +34,9 @@ public sealed class TimelineControl : Control
     private Capture? overviewCapture;
     private IReadOnlyList<Signal>? overviewSignals;
     private bool[] activityBins = [];
+    private (Capture? Capture, double Start, double End, double Width) traceKey;
+    private readonly Dictionary<Signal, (StreamGeometry Geometry, Rect[] Dense)> traces = new(ReferenceEqualityComparer.Instance);
+    private double visibleTop, visibleBottom = double.PositiveInfinity;
     private readonly List<(Rect Bounds, CaptureIssue Issue)> issueHits = [];
     public Canvas LabelControls { get; } = new() { Width = LabelWidth, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
     public event Action<int>? ColorRequested;
@@ -130,6 +133,39 @@ public sealed class TimelineControl : Control
         }
     }
     public void RevealSignal(int channel) { if (colorButtons.TryGetValue(channel, out var item)) item.Button.BringIntoView(); }
+    public void SetViewport(double top, double height)
+    {
+        if (height <= 0) return;
+        visibleTop = top; visibleBottom = top + height; InvalidateVisual();
+    }
+    private (StreamGeometry Geometry, Rect[] Dense) Trace(Signal signal)
+    {
+        var key = (model.Capture, model.Start, model.End, PlotWidth);
+        if (!ReferenceEquals(traceKey.Capture, model.Capture) || traceKey.Start != model.Start || traceKey.End != model.End || traceKey.Width != PlotWidth) { traces.Clear(); traceKey = key; }
+        if (traces.TryGetValue(signal, out var cached)) return cached;
+        var projection = WaveformProjection.Create(signal, model.Start, model.End, Math.Max(1, (int)Math.Ceiling(PlotWidth)));
+        var geometry = new StreamGeometry(); var dense = new List<Rect>();
+        double level = projection.Initial ? 16 : 35;
+        using (var g = geometry.Open())
+        {
+            g.BeginFigure(new(LabelWidth, level), false);
+            foreach (var run in projection.Runs)
+            {
+                double first = X(run.First.Sample), last = X(run.Last.Sample);
+                g.LineTo(new(first, level));
+                level = run.Last.High ? 16 : 35;
+                if (run.Count == 1) g.LineTo(new(first, level));
+                else
+                {
+                    // A dense band asserts activity, not a representative clock waveform.
+                    g.EndFigure(false); dense.Add(new(first, 16, Math.Max(.5, last - first), 19));
+                    g.BeginFigure(new(last, level), false);
+                }
+            }
+            g.LineTo(new(LabelWidth + PlotWidth, level)); g.EndFigure(false);
+        }
+        return traces[signal] = (geometry, dense.ToArray());
+    }
     public override void Render(DrawingContext context)
     {
         context.FillRectangle(Surface, Bounds.WithX(0).WithY(0));
@@ -215,27 +251,22 @@ public sealed class TimelineControl : Control
         foreach (var (signal, index) in model.Signals.Select((s, i) => (s, i)))
         {
             var y = SignalsTop + index * RowHeight;
+            if (y + RowHeight < visibleTop || y > visibleBottom) continue;
             context.FillRectangle(Ink(Probe[signal.Id % 8]), new(15, y + 16, 5, 20));
             Label(context, $"D{signal.Id}", 26, y + 8, Muted, 12);
             using (context.PushClip(new Rect(57, y, 73, RowHeight))) Label(context, signal.Name, 57, y + 7, Text, 13);
             IBrush color = SignalColor(signal.Id);
             using (context.PushClip(new Rect(LabelWidth, y, PlotWidth, RowHeight)))
             {
-                var edgeIndex = signal.LowerBound((long)Math.Ceiling(model.Start));
-                bool high = edgeIndex > 0 ? signal.Edges[edgeIndex - 1].High : signal.Initial;
-                double left = LabelWidth, level = y + (high ? 16 : 35);
-                var geometry = new StreamGeometry();
-                using (var g = geometry.Open())
+                var trace = Trace(signal);
+                using (context.PushTransform(Matrix.CreateTranslation(0, y)))
                 {
-                    g.BeginFigure(new(left, level), false);
-                    for (int i = edgeIndex; i < signal.Edges.Count && signal.Edges[i].Sample <= model.End; i++)
+                    using (context.PushOpacity(.6))
                     {
-                        var edge = signal.Edges[i]; var x = X(edge.Sample);
-                        g.LineTo(new(x, level)); level = y + (edge.High ? 16 : 35); g.LineTo(new(x, level));
+                        foreach (var band in trace.Dense) context.FillRectangle(color, band);
                     }
-                    g.LineTo(new(LabelWidth + PlotWidth, level)); g.EndFigure(false);
+                    context.DrawGeometry(null, new Pen(color, 1.35), trace.Geometry);
                 }
-                context.DrawGeometry(null, new Pen(color, 1.35), geometry);
                 foreach (var unknown in model.Capture.UnknownLevelSpans(signal))
                 {
                     var l = Math.Max(LabelWidth, X(unknown.Start)); var r = Math.Min(LabelWidth + PlotWidth, X(unknown.End));

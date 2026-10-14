@@ -16,6 +16,7 @@ annotations are precomputed and do not establish raw-decoder or hardware accurac
 | --- | --- | --- |
 | Board bring-up | 50 MS/s, 50,000 samples, 1 ms | Multiple protocols, packet fields and layered diagnostics |
 | Timing + gaps | 10 MS/s, 80,000 samples, 8 ms | Changed clock timing and bytes, normal read NACK, address NACK and missing coverage |
+| Dense signals | 50 MS/s, 6,000,000 samples, 120 ms | 32 raw channels with 32,768 transitions each; dense rendering and source-based timing; no decoded packets |
 
 The header marks missing data regardless of zoom. Capture source details gives
 the exact missing interval and a **Show interval** action. That explicit
@@ -49,6 +50,24 @@ The generator writes only `timing-gaps.json`. Focused checks compare its stored
 SCL sampling edges and SDA levels with the declared wire bytes, ACKs and STOP.
 This is fixture consistency verification, not a raw protocol decoder.
 
+## Dense signal generation
+
+`DemoCaptureSource` generates Dense signals on the background source-loading
+path. It allocates an independent transition array for each physical channel.
+No JSON fixture or raw decoder supplies this example. All initial levels are Low;
+there are no missing intervals or packet records.
+
+For channel `c` from 0 through 31, `step = 64 + (c % 16) * 4` samples and
+`offset = (c / 16) * 1,000,000 + c * 127` samples, using integer division.
+Transition `i` from 0 through 32,767 occurs at `offset + (i + 1) * step`;
+even `i` changes to High and odd `i` changes to Low. Generation checks cancellation
+between bounded batches. The last level continues to the recording's end.
+
+Select All signals and Fit time to see the full recording. A dense activity band
+retains short pulses even when their entering and exiting levels match. Zoom in
+for exact edges. The [rendering checks](WAVEFORM-RENDERING.md) count source access;
+they do not establish an interactive frame rate.
+
 ## Developer answer key
 
 Use these values to verify the implementation; do not read answers to a
@@ -74,7 +93,15 @@ participant during an independent usability task.
   a fabricated Low interval before it.
 - D8's level is unknown from 4 to 4.7 ms, then known High. D9 has no observed
   post-gap transition and remains unknown until the capture ends at 8 ms.
+- Dense signals D0: each complete High/Low pulse is 64 samples or 1.28 us;
+  a complete cycle is 128 samples or 2.56 us, giving 390.625 kHz.
+- Dense signals D31: each complete High/Low pulse is 124 samples or 2.48 us;
+  a complete cycle is 248 samples or 4.96 us, giving approximately 201.613 kHz.
+  For example, the Low pulse spans samples 1,499,937–1,500,061, and its full
+  cycle spans samples 1,499,937–1,500,185. The final incomplete pulse does not
+  establish another complete cycle.
 
 Passing these checks does not constitute independent usability acceptance.
-Device capture, real decoding, import, session persistence, large recordings,
-other desktop platforms and the full DPI matrix remain separate validation.
+Device capture, real decoding, import, session persistence, end-to-end performance
+on long recordings, other desktop platforms and the full DPI matrix remain
+separate validation.

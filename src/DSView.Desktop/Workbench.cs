@@ -159,7 +159,7 @@ public sealed class Workbench : ObservableObject
             else
             {
                 var signal = Signals.First(s => s.Id == Probe.Channel);
-                var edge = timeDirection > 0 ? signal.Edges.FirstOrDefault(e => e.Sample > Probe.Sample && Capture.HasSample(e.Sample)) : signal.Edges.LastOrDefault(e => e.Sample < Probe.Sample && Capture.HasSample(e.Sample));
+                var edge = timeDirection > 0 ? Capture.ObservedEdgeAtOrAfter(signal, Probe.Sample + 1) : Capture.ObservedEdgeBefore(signal, Probe.Sample);
                 if (edge == null) { Hint = "No further observed edge on this signal."; Notify(); return; }
                 Probe = new(signal.Id, edge.Sample, true);
             }
@@ -230,7 +230,7 @@ public sealed class Workbench : ObservableObject
     {
         var signal = Capture?.Signals.First(s => s.Id == channel); if (signal == null) return;
         var center = (Start + End) / 2;
-        Edge? edge = direction > 0 ? signal.Edges.FirstOrDefault(e => e.Sample > center && Capture!.HasSample(e.Sample)) : signal.Edges.LastOrDefault(e => e.Sample < center && Capture!.HasSample(e.Sample));
+        Edge? edge = direction > 0 ? Capture!.ObservedEdgeAtOrAfter(signal, (long)Math.Floor(center) + 1) : Capture!.ObservedEdgeBefore(signal, (long)Math.Ceiling(center));
         if (edge == null) { Hint = "No further edge in this capture."; Notify(); return; }
         Remember(); var span = End - Start; SetRange(edge.Sample - span / 2, edge.Sample + span / 2);
     }

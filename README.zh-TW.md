@@ -38,10 +38,16 @@ dotnet run --project src/DSView.Desktop --no-build
 dotnet run --project tests/DSView.Checks --no-build
 ```
 
-點上方來源摘要，可切換 **Board bring-up**（50 MS/s）與 **Timing + gaps**（10 MS/s）。
-後者有不同資料與時鐘速度、讀取結束、位址 NACK 及缺資料區間。
+點上方來源摘要，可選 **Board bring-up**（50 MS/s）、**Timing + gaps**（10 MS/s）
+或 **Dense signals**（50 MS/s）。Timing + gaps 有不同資料與時鐘速度、讀取結束、
+位址 NACK 及缺資料區間。Dense signals 有 32 路原始訊號，120 ms 內共 1,048,576 個
+transition，沒有解析封包。
 開啟範例會清除分析狀態，保留 Group／線色偏好。
 詳見[離線範例與驗證數值](docs/OFFLINE-EXAMPLES.md)。
+
+密集波形先顯示活動帶，放大後可看見個別 transition。
+選點與量測始終使用原始 sample，不受顯示細節影響。
+實作方式與選用的操作次數檢查見[波形繪製](docs/WAVEFORM-RENDERING.md)。
 
 先選 Group 或 All signals。指向脈衝可預覽量測，點一下固定結果。
 Measure A/B 依序選兩個參考點；Position 可量指定的取樣位置。

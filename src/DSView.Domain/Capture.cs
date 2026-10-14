@@ -63,40 +63,73 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
     public bool HasSample(long sample) => sample >= 0 && sample < SampleCount && !Gaps.Any(g => g.Start <= sample && g.End > sample);
     public Edge? NearestObservedEdge(Signal signal, long sample)
     {
-        int right = signal.LowerBound(sample), left = right - 1;
-        while (left >= 0 && !HasSample(signal.Edges[left].Sample)) left--;
-        while (right < signal.Edges.Count && !HasSample(signal.Edges[right].Sample)) right++;
-        if (left < 0) return right < signal.Edges.Count ? signal.Edges[right] : null;
-        if (right == signal.Edges.Count) return signal.Edges[left];
-        return sample - signal.Edges[left].Sample <= signal.Edges[right].Sample - sample ? signal.Edges[left] : signal.Edges[right];
+        var left = ObservedEdgeBefore(signal, sample); var right = ObservedEdgeAtOrAfter(signal, sample);
+        if (left == null) return right;
+        if (right == null) return left;
+        return sample - left.Sample <= right.Sample - sample ? left : right;
+    }
+    public Edge? ObservedEdgeAtOrAfter(Signal signal, long sample) => ObservedEdgeFrom(signal, signal.LowerBound(Math.Max(0, sample)), 1);
+    public Edge? ObservedEdgeBefore(Signal signal, long sample) => ObservedEdgeFrom(signal, signal.LowerBound(Math.Min(SampleCount, sample)) - 1, -1);
+    private Edge? ObservedEdgeFrom(Signal signal, int index, int direction)
+    {
+        while (index >= 0 && index < signal.Edges.Count)
+        {
+            var edge = signal.Edges[index];
+            if (edge.Sample < 0 || edge.Sample >= SampleCount) return null;
+            var covering = Gaps.Where(g => g.Start <= edge.Sample && g.End > edge.Sample).ToArray();
+            if (covering.Length == 0) return edge;
+            // Jump over the whole missing interval, including overlapping or unsorted gaps.
+            index = direction > 0 ? signal.LowerBound(covering.Max(g => g.End)) : signal.LowerBound(covering.Min(g => g.Start)) - 1;
+        }
+        return null;
+    }
+    public int ObservedEdgeCount(Signal signal, long start, long end)
+    {
+        if (start >= end) return 0;
+        start = Math.Max(0, start); end = Math.Min(SampleCount, end);
+        if (start >= end) return 0;
+        if (Gaps.Any(g => g.Start <= start && g.End >= end)) return 0;
+        int count = signal.LowerBound(end) - signal.LowerBound(start);
+        long covered = start;
+        foreach (var gap in Gaps.Where(g => g.Start < end && g.End > start).OrderBy(g => g.Start))
+        {
+            long left = Math.Max(covered, Math.Max(start, gap.Start)), right = Math.Min(end, gap.End);
+            if (right <= left) continue;
+            count -= signal.LowerBound(right) - signal.LowerBound(left); covered = right;
+        }
+        return count;
     }
     public SignalActivity Activity(int channel, long start, long end)
     {
         var signal = Signals.FirstOrDefault(s => s.Id == channel);
         if (signal == null || start < 0 || end > SampleCount || start >= end) return new(0, false, null);
-        int first = signal.LowerBound(start), last = signal.LowerBound(end);
-        int count = Gaps.Count == 0 ? last - first : signal.Edges.Skip(first).Take(last - first).Count(e => HasSample(e.Sample));
+        int count = ObservedEdgeCount(signal, start, end);
         bool complete = !Gaps.Any(g => g.Start < end && g.End > start);
-        long evidence = first > 0 ? signal.Edges[first - 1].Sample : 0;
+        var previous = ObservedEdgeBefore(signal, start);
+        long evidence = previous?.Sample ?? 0;
         bool knownLevel = complete && !Gaps.Any(g => g.Start <= start && g.End > evidence);
-        return new(count, complete, count == 0 && knownLevel ? first > 0 ? signal.Edges[first - 1].High : signal.Initial : null);
+        return new(count, complete, count == 0 && knownLevel ? previous?.High ?? signal.Initial : null);
     }
     // A gap invalidates the level until a subsequent observed transition establishes it again.
     public IEnumerable<SourceSpan> UnknownLevelSpans(Signal signal)
     {
         foreach (var gap in Gaps)
         {
-            int next = signal.LowerBound(gap.End);
-            while (next < signal.Edges.Count && !HasSample(signal.Edges[next].Sample)) next++;
-            yield return new(Math.Max(0, gap.Start), next < signal.Edges.Count ? signal.Edges[next].Sample : SampleCount);
+            var next = ObservedEdgeAtOrAfter(signal, gap.End);
+            yield return new(Math.Max(0, gap.Start), next?.Sample ?? SampleCount);
         }
     }
     public bool[] ActivityBins(IEnumerable<Signal> signals, int count)
     {
         if (count < 1 || SampleCount <= 0) throw new ArgumentOutOfRangeException(nameof(count));
         var bins = new bool[count];
-        foreach (var edge in signals.SelectMany(s => s.Edges).Where(e => HasSample(e.Sample)))
-            bins[Math.Clamp((int)(edge.Sample / (double)SampleCount * count), 0, count - 1)] = true;
+        var sources = signals.ToArray();
+        long Boundary(int index) => SampleCount / count * index + ((SampleCount % count) * index + count - 1) / count;
+        for (int i = 0; i < count; i++)
+        {
+            long start = Boundary(i), end = Boundary(i + 1);
+            bins[i] = sources.Any(signal => ObservedEdgeCount(signal, start, end) > 0);
+        }
         return bins;
     }
     public IReadOnlyList<CaptureIssue> Issues => Packets.SelectMany(p =>

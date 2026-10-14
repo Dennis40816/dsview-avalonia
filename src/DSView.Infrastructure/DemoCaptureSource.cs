@@ -14,11 +14,13 @@ public static class DemoCaptureSource
 {
     public static readonly IReadOnlyList<DemoExample> Examples = [
         new("demo-capture", "Board bring-up", "I²C, SPI and UART with application and framing diagnostics."),
-        new("timing-gaps", "Timing + gaps", "Different timing and bytes, I²C read termination, address NACK and a missing-data interval.")];
+        new("timing-gaps", "Timing + gaps", "Different timing and bytes, I²C read termination, address NACK and a missing-data interval."),
+        new("dense-signals", "Dense signals", "32 synthetic raw signals, 1,048,576 transitions over 120 ms. No decoded packets.")];
     public static Task<Capture> LoadAsync(CancellationToken cancellation = default) => LoadAsync(Examples[0].Id, cancellation);
     public static Task<Capture> LoadAsync(string example, CancellationToken cancellation = default) => Task.Run(() =>
     {
         if (!Examples.Any(e => e.Id == example)) throw new ArgumentException("Unknown offline example.", nameof(example));
+        if (example == "dense-signals") return DenseSignals(cancellation);
         using var stream = typeof(DemoCaptureSource).Assembly.GetManifestResourceStream($"DSView.Infrastructure.Fixtures.{example}.json")!;
         using var document = JsonDocument.Parse(stream);
         var root = document.RootElement;
@@ -61,6 +63,22 @@ public static class DemoCaptureSource
         }
         return new Capture(rate, count, signals.OrderBy(s => s.Id).ToArray(), packets.OrderBy(p => p.Span.Start).ToArray()) { Gaps = gaps };
     }, cancellation);
+    private static Capture DenseSignals(CancellationToken cancellation)
+    {
+        var signals = new Signal[32];
+        for (int channel = 0; channel < signals.Length; channel++)
+        {
+            var edges = new Edge[32768];
+            long step = 64 + channel % 16 * 4, offset = channel / 16 * 1_000_000 + channel * 127;
+            for (int i = 0; i < edges.Length; i++)
+            {
+                if ((i & 1023) == 0) cancellation.ThrowIfCancellationRequested();
+                edges[i] = new(offset + (i + 1) * step, (i & 1) == 0);
+            }
+            signals[channel] = new(channel, channel == 0 ? "CLOCK" : $"SIGNAL_{channel:00}", false, edges);
+        }
+        return new(50_000_000, 6_000_000, signals, []);
+    }
     private static string Text(JsonElement value, string key) => value.TryGetProperty(key, out var v) ? v.GetString() ?? "" : "";
     private static byte[] Bytes(JsonElement value, string key) => value.GetProperty(key).EnumerateArray().Select(b => b.GetByte()).ToArray();
 }

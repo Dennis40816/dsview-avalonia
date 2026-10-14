@@ -94,6 +94,7 @@ public sealed class MainWindow : Window
         Add(waveformGrid, ruler, 0);
         var timelineHost = new Grid(); timelineHost.Children.Add(timeline); timelineHost.Children.Add(timeline.LabelControls);
         waveScroll = new ScrollViewer { Content = timelineHost, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        waveScroll.ScrollChanged += (_, _) => timeline.SetViewport(waveScroll.Offset.Y, waveScroll.Viewport.Height);
         Add(waveformGrid, waveScroll, 2);
         wavePanel = waveformGrid;
         var packetGrid = new Grid { RowDefinitions = new("Auto,*") }; Add(packetGrid, search, 0); Add(packetGrid, packets, 1); packetPanel = packetGrid;

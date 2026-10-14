@@ -180,4 +180,40 @@ foreach (var pair in new[] { (168d, 168d), (685d, 685d), (400d, 400d), (405d, 40
     clearHandles &= handles.Count == 2 && handles[0].Endpoint == 0 && handles[1].Endpoint == 1 && handles[0].SampleX == pair.Item1 && handles[1].SampleX == pair.Item2 && handles.All(h => h.Bounds.Left >= 168 && h.Bounds.Right <= 685) && !handles[0].Bounds.Intersects(handles[1].Bounds);
 }
 Check(clearHandles && MarkerHandles.Layout(167, 686, 168, 685).Count == 0, "Coincident/reversed/boundary handles remain separate, correctly owned and tied to their true coordinates");
+var narrowPulse = new Signal(0, "One sample pulse", false, [new(500, true), new(501, false)]);
+var envelope = WaveformProjection.Create(narrowPulse, 0, 1000, 1);
+Check(!envelope.Initial && envelope.Runs is [var run] && run.Count == 2 && run.First.Sample == 500 && run.Last.Sample == 501 && !run.Last.High, "A subpixel pulse with equal entering/exiting levels remains dense activity");
+var exact = WaveformProjection.Create(smallSignal, 10, 80, 100);
+Check(!exact.Initial && exact.Runs.All(r => r.Count == 1) && exact.Runs.Select(r => r.First.Sample).SequenceEqual(new long[] { 10, 30, 60, 80 }), "Sparse projection retains exact viewport-boundary edges and preceding level");
+var fractional = WaveformProjection.Create(smallSignal, 10.25, 79.75, 1);
+Check(fractional.Initial && fractional.Runs.Sum(r => r.Count) == 2 && fractional.Runs[0].First.Sample == 30 && fractional.Runs[^1].Last.Sample == 60, "Fractional viewport bounds do not pull outside transitions into the trace");
+bool projectionMatches = true, gapQueriesMatch = true;
+var random = new Random(815);
+for (int trial = 0; trial < 100; trial++)
+{
+    var signal = new Signal(0, "Irregular", false, Enumerable.Range(0, 1000).Where(_ => random.Next(3) == 0).Select((sample, i) => new Edge(sample, (i & 1) == 0)).ToArray());
+    double start = random.Next(100) + .25, end = random.Next(700, 1000) + .75;
+    var projected = WaveformProjection.Create(signal, start, end, random.Next(1, 100));
+    var visible = signal.Edges.Where(e => e.Sample >= start && e.Sample <= end).ToArray();
+    projectionMatches &= projected.Runs.Sum(r => r.Count) == visible.Length && projected.Runs.SelectMany(r => signal.Edges.Where(e => e.Sample >= r.First.Sample && e.Sample <= r.Last.Sample)).SequenceEqual(visible);
+    var gapped = new Capture(1000, 1000, [signal], []) { Gaps = [new(400, 600), new(190, 300), new(250, 450), new(800, 810)] };
+    long lo = random.Next(0, 900), hi = random.Next((int)lo + 1, 1001);
+    var observed = signal.Edges.Where(e => gapped.HasSample(e.Sample)).ToArray();
+    gapQueriesMatch &= gapped.ObservedEdgeCount(signal, lo, hi) == observed.Count(e => e.Sample >= lo && e.Sample < hi)
+        && gapped.ObservedEdgeAtOrAfter(signal, lo) == observed.FirstOrDefault(e => e.Sample >= lo)
+        && gapped.ObservedEdgeBefore(signal, hi) == observed.LastOrDefault(e => e.Sample < hi);
+    int binCount = random.Next(1, 100);
+    var referenceBins = new bool[binCount]; foreach (var edge in observed) referenceBins[(int)(edge.Sample / 1000d * binCount)] = true;
+    gapQueriesMatch &= gapped.ActivityBins([signal], binCount).SequenceEqual(referenceBins);
+}
+Check(projectionMatches, "Irregular traces partition all visible transitions exactly once across dense columns");
+Check(gapQueriesMatch, "Unsorted overlapping gap count/navigation/overview agree with exhaustive observed-source reference");
+var binBoundary = new Capture(1000, 25, [new Signal(0, "Boundary", false, [new(7, true)])], []);
+Check(binBoundary.ActivityBins(binBoundary.Signals, 25).Select((value, index) => (value, index)).Where(x => x.value).Single().index == 7, "Integer overview boundaries do not move sample7 into bin6 through floating rounding");
+var partition = WaveformProjection.Create(new Signal(0, "Partition", false, Enumerable.Range(0, 26).Select(i => new Edge(i, (i & 1) == 0)).ToArray()), 0, 25, 10);
+Check(partition.Runs.Select((r, i) => r.First.Sample == (long)decimal.Ceiling(i * 2.5m) && r.Last.Sample == (i == 9 ? 25 : (long)decimal.Ceiling((i + 1) * 2.5m) - 1)).All(x => x), "Dense column membership uses exact boundaries including the final viewport edge");
+var denseCapture = await DemoCaptureSource.LoadAsync("dense-signals");
+Check(denseCapture.Signals.Count == 32 && denseCapture.Signals.Sum(s => s.Edges.Count) == 1_048_576 && denseCapture.SampleCount == 6_000_000 && denseCapture.Packets.Count == 0, "Dense native example has 32 physical channels and 1048576 independent stored transitions");
+Check(denseCapture.MeasureAt(0, 192) is { WidthSamples: 64, PeriodSamples: 128 } && denseCapture.MeasureAt(31, 1_004_200) is { WidthSamples: 124, PeriodSamples: 248 }, "Dense example timing remains source-based at both ends of the channel list");
+if (args.Contains("--performance")) WorkScaling.Run(Check);
 Console.WriteLine($"{passed} focused checks passed.");
