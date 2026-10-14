@@ -50,6 +50,10 @@ transition，沒有解析封包。
 沒有可見訊號時，edge 導覽與新選點操作會停用。既有量測保留；**Fit** 可找回兩個端點，
 或用 **Show all signals** 恢復已擷取通道並維持目前時間範圍。
 
+Group 編輯器提供這次已擷取的訊號與來源相符的 decoder tracks；已保存但這次未擷取的成員會另外列出並保留。
+編輯 **All signals** 會用這次的訊號建立另一個 Group。Group 只改變觀察範圍，勾選 decoder track 不會啟動擷取或解析。
+重開時會還原所有有效的已存 Group。
+
 有本機 native worker 設定時，來源清單會出現 **I²C from samples**。
 它只有 D0/SCL 與 D1/SDA，背景解析與顯示、量測使用同一份原始 samples。
 Worker 與 runtime 尚未隨產品提供。設定、程序檢查與限制見[開發用解析契約](docs/NATIVE-I2C.md)。

@@ -216,6 +216,7 @@ var denseCapture = await DemoCaptureSource.LoadAsync("dense-signals");
 Check(denseCapture.Signals.Count == 32 && denseCapture.Signals.Sum(s => s.Edges.Count) == 1_048_576 && denseCapture.SampleCount == 6_000_000 && denseCapture.Packets.Count == 0, "Dense native example has 32 physical channels and 1048576 independent stored transitions");
 Check(denseCapture.MeasureAt(0, 192) is { WidthSamples: 64, PeriodSamples: 128 } && denseCapture.MeasureAt(31, 1_004_200) is { WidthSamples: 124, PeriodSamples: 248 }, "Dense example timing remains source-based at both ends of the channel list");
 ClarityChecks.Run(Check, capture, denseCapture);
+GroupEditingChecks.Run(Check, capture);
 int nativeOption = Array.IndexOf(args, "--native-i2c");
 if (nativeOption >= 0 && nativeOption + 1 >= args.Length) throw new ArgumentException("--native-i2c requires a configuration path.");
 await RawDecodeChecks.Run(Check, nativeOption < 0 ? null : args[nativeOption + 1]);

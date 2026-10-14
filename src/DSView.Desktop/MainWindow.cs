@@ -377,37 +377,65 @@ public sealed class MainWindow : Window
     private async void EditGroup(bool create)
     {
         var original = Model.Group;
-        var dialog = new Window { Title = create ? "New group" : "Edit observation group", Width = 590, Height = 600, MinWidth = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner };
+        bool isNew = create || Model.IsAllSignals;
+        var draft = new GroupEditState(Model.Capture, create ? null : original);
+        var dialog = new Window { Title = isNew ? "New group" : "Edit observation group", Width = 640, Height = 600, MinWidth = 520, MinHeight = 380, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var body = new StackPanel { Spacing = 14, Margin = new(20) };
-        var name = new TextBox { Text = create || original.Name == "All signals" ? "New group" : original.Name, PlaceholderText = "Group name", MaxLength = 40 };
-        body.Children.Add(Text("Group name", true)); body.Children.Add(name); body.Children.Add(Text("Decoders · required source signals are included", true));
-        var channelSet = new HashSet<int>(create ? [] : original.Channels); var decoderSet = new HashSet<string>(create ? [] : original.Decoders);
+        var name = new TextBox { Text = isNew ? "New group" : original.Name, PlaceholderText = "Group name", MaxLength = 40 };
+        AutomationProperties.SetName(name, "Group name");
+        body.Children.Add(Text("Group name", true)); body.Children.Add(name);
+        body.Children.Add(new TextBlock { Text = "Choose what to view together. Capture settings stay unchanged.", TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
+        body.Children.Add(Text("Decoder tracks · includes required signals", true));
         var checks = new Dictionary<int, CheckBox>(); var decoderChecks = new Dictionary<string, CheckBox>(); bool changing = false;
+        void RefreshChecks()
+        {
+            changing = true;
+            foreach (var (id, check) in checks) check.IsChecked = draft.Channels.Contains(id);
+            foreach (var (id, check) in decoderChecks) check.IsChecked = draft.Decoders.Contains(id);
+            changing = false;
+        }
         var decoderRow = new WrapPanel { Orientation = Orientation.Horizontal };
-        foreach (var decoder in Capture.Decoders)
+        foreach (var decoder in draft.OfferedDecoders)
         {
-            var check = new CheckBox { Content = decoder.Name, IsChecked = decoderSet.Contains(decoder.Id), Margin = new(0, 0, 18, 0) }; decoderChecks[decoder.Id] = check;
-            check.IsCheckedChanged += (_, _) => { if (changing) return; changing = true; if (check.IsChecked == true) { decoderSet.Add(decoder.Id); foreach (var id in decoder.Channels) { channelSet.Add(id); if (checks.TryGetValue(id, out var source)) source.IsChecked = true; } } else decoderSet.Remove(decoder.Id); changing = false; }; decoderRow.Children.Add(check);
+            string label = decoder.Name + (draft.HasSources(decoder) ? "" : " · source not captured");
+            var check = new CheckBox { Content = label, IsChecked = draft.Decoders.Contains(decoder.Id), Margin = new(0, 0, 18, 4) }; decoderChecks[decoder.Id] = check;
+            check.IsCheckedChanged += (_, _) => { if (changing) return; draft.SetDecoder(decoder.Id, check.IsChecked == true); RefreshChecks(); }; decoderRow.Children.Add(check);
         }
-        body.Children.Add(decoderRow); body.Children.Add(Text("Signals · physical probe order", true));
-        var channelGrid = new UniformGrid { Columns = 4 };
-        for (int i = 0; i < 32; i++)
+        body.Children.Add(decoderRow);
+        if (draft.OfferedDecoders.Count == 0) body.Children.Add(Text("No decoder tracks have their source signals in this capture.", true));
+        void AddSignals(IEnumerable<int> members, bool missing)
         {
-            int id = i; var signal = Model.Capture?.Signals.FirstOrDefault(s => s.Id == id);
-            var check = new CheckBox { Content = $"D{id}  {signal?.Name}", IsChecked = channelSet.Contains(id), FontSize = 11, Margin = new(0, 0, 8, 4) }; checks[id] = check;
-            check.IsCheckedChanged += (_, _) => { if (changing) return; changing = true; if (check.IsChecked == true) channelSet.Add(id); else { channelSet.Remove(id); foreach (var d in Capture.Decoders.Where(d => d.Channels.Contains(id))) { decoderSet.Remove(d.Id); decoderChecks[d.Id].IsChecked = false; } } changing = false; }; channelGrid.Children.Add(check);
+            var ids = members.Order().ToArray();
+            if (ids.Length == 0) return;
+            body.Children.Add(Text(missing ? "Saved signals · not in this capture" : $"Captured signals · {ids.Length} · probe order", true));
+            if (missing) body.Children.Add(Text("Kept for other captures. Uncheck to remove.", true));
+            var channelGrid = new UniformGrid { Columns = ids.Length <= 8 ? 2 : 3 };
+            foreach (int id in ids)
+            {
+                var signal = Model.Capture?.Signals.FirstOrDefault(s => s.Id == id);
+                string label = $"D{id}" + (signal == null ? "" : "  " + signal.Name);
+                var check = new CheckBox { Content = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap }, IsChecked = draft.Channels.Contains(id), FontSize = 13, Margin = new(0, 0, 10, 6), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                AutomationProperties.SetName(check, label + (missing ? " · Not captured" : "")); checks[id] = check;
+                check.IsCheckedChanged += (_, _) => { if (changing) return; draft.SetChannel(id, check.IsChecked == true); RefreshChecks(); }; channelGrid.Children.Add(check);
+            }
+            body.Children.Add(channelGrid);
         }
-        body.Children.Add(channelGrid); var error = Text(""); error.Foreground = TimelineControl.Ink("#FF9AAA"); body.Children.Add(error);
-        var actions = Row(); actions.Children.Add(Button("New group", () => { dialog.Close(); EditGroup(true); })); actions.Children.Add(Button("Cancel", dialog.Close));
-        actions.Children.Add(Button("Save group", () =>
+        AddSignals(draft.CapturedChannels, false);
+        AddSignals(draft.OfferedChannels.Except(draft.CapturedChannels), true);
+        var footer = new StackPanel { Spacing = 10, Margin = new(20, 12, 20, 20) };
+        var error = Text(""); error.Foreground = TimelineControl.Ink("#FF9AAA"); error.TextWrapping = TextWrapping.Wrap; error.IsVisible = false; footer.Children.Add(error);
+        var actions = Row();
+        if (!isNew) actions.Children.Add(Button("New group", () => { dialog.Close(); EditGroup(true); }));
+        else if (!create) actions.Children.Add(Button("Start empty", () => { foreach (int id in draft.Channels.ToArray()) draft.SetChannel(id, false); RefreshChecks(); }));
+        var cancel = Button("Cancel", dialog.Close); cancel.IsCancel = true; actions.Children.Add(cancel);
+        var save = Button(isNew ? "Create group" : "Save group", () =>
         {
-            string title = name.Text?.Trim() ?? "";
-            if (title.Length == 0 || title == "All signals" || channelSet.Count == 0) { error.Text = "Enter a name and select at least one signal."; return; }
-            if (Model.Groups.Any(g => g.Name.Equals(title, StringComparison.OrdinalIgnoreCase) && (create || !ReferenceEquals(g, original)))) { error.Text = "Choose a different group name."; return; }
-            var edited = new ObservationGroup(title, channelSet.Order().ToArray(), decoderSet.ToArray());
-            if (!create && original.Name != "All signals") Model.Groups[Model.Groups.IndexOf(original)] = edited; else Model.Groups.Insert(Model.Groups.Count - 1, edited);
-            Model.SetGroup(edited); SavePreferences(); dialog.Close();
-        }, "primary")); body.Children.Add(actions); dialog.Content = new ScrollViewer { Content = body }; await dialog.ShowDialog(this);
+            if (!draft.TryBuild(name.Text, Model.Groups, isNew ? null : original, out var edited, out var message)) { error.Text = message; error.IsVisible = true; return; }
+            if (isNew) Model.Groups.Insert(Model.Groups.Count - 1, edited!); else Model.Groups[Model.Groups.IndexOf(original)] = edited!;
+            Model.SetGroup(edited!); SavePreferences(); dialog.Close();
+        }, "primary"); actions.Children.Add(save); footer.Children.Add(actions);
+        var layout = new Grid { RowDefinitions = new("*,Auto") }; Add(layout, new ScrollViewer { Content = body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, 0); Add(layout, Band(footer), 1);
+        dialog.Content = layout; dialog.Opened += (_, _) => name.Focus(); await dialog.ShowDialog(this);
     }
     private async void EditColor(int channel)
     {
@@ -451,8 +479,8 @@ public sealed class MainWindow : Window
         {
             if (!File.Exists(preferencePath)) return;
             var preferences = JsonSerializer.Deserialize<Preferences>(File.ReadAllText(preferencePath)); if (preferences?.Version != 1) return;
-            var valid = (preferences.Groups ?? []).Where(g => !string.IsNullOrWhiteSpace(g.Name) && g.Name.Length <= 40 && g.Name != "All signals" && g.Channels is { Length: > 0 } && g.Channels.All(c => c is >= 0 and < 32) && g.Decoders != null).Take(20).ToArray();
-            if (valid.Length > 0) { Model.Groups.Clear(); foreach (var g in valid) { var ds = Capture.Decoders.Where(d => g.Decoders.Contains(d.Id)).ToArray(); Model.Groups.Add(new(g.Name, g.Channels.Concat(ds.SelectMany(d => d.Channels)).Distinct().Order().ToArray(), ds.Select(d => d.Id).ToArray())); } Model.Groups.Add(new("All signals", Enumerable.Range(0, 32).ToArray(), [])); }
+            var valid = GroupEditState.Restore(preferences.Groups);
+            if (valid.Length > 0) { Model.Groups.Clear(); foreach (var group in valid) Model.Groups.Add(group); Model.Groups.Add(new("All signals", Enumerable.Range(0, 32).ToArray(), [])); }
             Model.SetGroup(Model.Groups.FirstOrDefault(g => g.Name == preferences.ActiveGroup) ?? Model.Groups[0]);
             foreach (var pair in preferences.Colors ?? []) if (pair.Key is >= 0 and < 32 && Color.TryParse(pair.Value, out _)) Model.Colors[pair.Key] = pair.Value;
         }

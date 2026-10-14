@@ -61,6 +61,13 @@ and new picking are disabled until signals are visible. Existing measurements
 remain available; **Fit** recovers both endpoints, or **Show all signals** restores
 the captured rows without changing the time range.
 
+The Group editor offers signals captured by the current source and compatible
+decoder tracks. Existing members absent from this capture remain listed as saved
+members, so editing does not erase a reusable Group. Editing **All signals**
+creates a separate Group starting with the current captured signals. Groups
+change the view; selecting a decoder track does not start acquisition or decoding.
+All valid saved Groups are restored on restart.
+
 **I²C from samples** appears when a local native-worker configuration is present.
 It contains only D0/SCL and D1/SDA; its packets are decoded in a background job
 from the same samples used for display and timing. The worker/runtime is not
