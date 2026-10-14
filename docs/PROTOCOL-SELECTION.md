@@ -1,0 +1,35 @@
+<!-- SPDX-FileCopyrightText: 2026 Dennis40816 -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+# Inspecting decoded evidence
+
+Select a decoded byte on the waveform or in the packet inspector's Hex sequence.
+The inspector identifies its one-based data-byte number, value and decoded
+interval. The waveform highlights that interval and fields whose source spans
+overlap it. Address, ACK/NACK and START/STOP remain separate elements. Point
+events have a position; the application does not invent a bit duration for them.
+
+Selection preserves time, Group and A/B. **Locate selected** explicitly frames
+the element's source; **Previous** returns to the earlier view. **Whole packet**
+returns to transaction selection. At coarse zoom, an aggregate selects the
+whole packet. Copy byte copies only the selected data byte in Hex; Copy data
+copies the packet's data bytes, excluding its address and protocol flags.
+
+Byte selection uses packet identity plus the ordered element index. Repeated
+Hex values remain distinct. Synthetic I2C wire cells provide explicit byte
+spans. For native I2C annotations, byte association is available only when the
+complete ordered data sequence matches the packet's address and bytes. A
+partial or ambiguous correspondence provides no individual Hex-source action.
+Other protocols without byte source metadata remain packet-level. No packet
+duration is divided to estimate byte boundaries.
+
+Decoded intervals are annotations, not raw-edge timing measurements. Their
+coordinates may reach past EOF or overlap missing samples; selecting them
+does not establish valid raw coverage. Use the signal measurement tools for
+edge timing. Existing generated examples remain synthetic sources.
+
+The inspector creates at most 64 byte controls at once and offers additional
+pages when needed. Keyboard focus returns to a byte after selecting it in the
+inspector. The selected protocol element is saved in analysis format version 2.
+Version 1 documents reopen at packet level and are upgraded on Save. Older
+applications reject version 2; keep an original file if it is needed by an older
+development build.

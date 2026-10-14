@@ -27,7 +27,8 @@ from the file.
   anchor. The anchor is clamped to the new window's visible extent.
 - A/B channel, exact sample and Edge/Position kind. Local pulse width, cycle and
   frequency are recalculated from the stored transitions.
-- Selected packet/diagnostic, detail visibility, Waveforms/Packets and search.
+- Selected packet/diagnostic or ordered protocol element, detail visibility,
+  Waveforms/Packets and search.
 
 Pending picks, drags and invalid numeric drafts must be finished or cancelled
 before saving. Hover/probe, transient hints, navigation history and window
@@ -58,13 +59,17 @@ Save / Discard / Cancel prompt protect deliberate unsaved work.
 
 ## Current format limits
 
-Version 1 accepts at most 128 MiB, 32 physical signals, 2,000,000 stored
+Version 2 accepts at most 128 MiB, 32 physical signals, 2,000,000 stored
 transitions, 100,000 packets, 10,000 missing intervals and 1,024 saved Groups.
 Additional bounds apply to field/diagnostic text and collections. Unsupported
 versions and unknown properties are rejected. All persisted properties must be
-present, including nullable properties, so missing coverage/initial levels or
+present, including nullable properties, except the optional presentation-only
+protocol selection, so missing coverage/initial levels or
 completion state cannot silently become defaults. Derived issue graphs and
 formatted values are excluded from serialization.
+
+Version 1 files remain readable without a selected protocol element. Saving
+upgrades them to version 2; previous development builds reject version 2.
 
 These bounded offline documents are a starting point for analysis persistence.
 Long recordings need a separate streaming storage design; increasing JSON limits

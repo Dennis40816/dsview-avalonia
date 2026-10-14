@@ -24,6 +24,8 @@ public sealed class Workbench : ObservableObject
     public int? Armed { get; private set; }
     public Packet? Selected { get; private set; }
     public CaptureIssue? SelectedIssue { get; private set; }
+    public int? SelectedProtocolIndex { get; private set; }
+    public ProtocolItem? SelectedProtocol { get; private set; }
     public IReadOnlyList<CaptureIssue> Issues { get; private set; } = [];
     public event Action<int>? SignalFocusRequested;
     public event Action<IReadOnlyList<int>>? MeasurementFocusRequested;
@@ -47,7 +49,7 @@ public sealed class Workbench : ObservableObject
         var committed = editOrigin ?? (A, B, Mode, PinnedMeasurement);
         return new(Groups.Where(g => g.Name != "All signals").Select(g => new ObservationGroup(g.Name, g.Channels.ToArray(), g.Decoders.ToArray())).ToArray(),
             Group.Name, Colors.OrderBy(c => c.Key).ToDictionary(), Start, End, committed.Item1, committed.Item2, committed.Item3, committed.Item4 != null,
-            Selected?.Id, SelectedIssue?.Diagnostic.Id, Details && Selected != null, PacketsTab, Query, vertical, edgeChannel);
+            Selected?.Id, SelectedIssue?.Diagnostic.Id, Details && Selected != null, PacketsTab, Query, vertical, edgeChannel) { SelectedProtocolIndex = SelectedProtocolIndex };
     }
     public void RestoreAnalysis(AnalysisDocument document)
     {
@@ -55,7 +57,7 @@ public sealed class Workbench : ObservableObject
         ApplyAnalysis(PrepareValidatedAnalysis(document));
     }
     internal sealed record PreparedAnalysis(AnalysisDocument Document, IReadOnlyList<CaptureIssue> Issues,
-        Packet? Selected, CaptureIssue? Issue, LocalMeasurement? Local, ObservationGroup[] Groups);
+        Packet? Selected, CaptureIssue? Issue, ProtocolItem? Protocol, LocalMeasurement? Local, ObservationGroup[] Groups);
     // Used only after AnalysisFile.ReadAsync has validated the entire file on a worker.
     internal static PreparedAnalysis PrepareValidatedAnalysis(AnalysisDocument document)
     {
@@ -65,7 +67,8 @@ public sealed class Workbench : ObservableObject
         var local = state.LocalPulse ? capture.MeasureAt(state.A!.Channel, state.A.Sample) : null;
         var groups = state.Groups.Select(g => new ObservationGroup(g.Name, g.Channels.ToArray(), g.Decoders.ToArray()))
             .Append(new ObservationGroup("All signals", Enumerable.Range(0, 32).ToArray(), [])).ToArray();
-        return new(document, issues, selected, issue, local, groups);
+        var protocol = selected != null && state.SelectedProtocolIndex is int index ? capture.ProtocolItems(selected)[index] : null;
+        return new(document, issues, selected, issue, protocol, local, groups);
     }
     internal void ApplyAnalysis(PreparedAnalysis prepared)
     {
@@ -76,6 +79,8 @@ public sealed class Workbench : ObservableObject
         Colors.Clear(); foreach (var pair in state.Colors) Colors.Add(pair.Key, pair.Value);
         A = state.A; B = state.B; Mode = state.Mode; PinnedMeasurement = prepared.Local;
         Selected = prepared.Selected; Issues = prepared.Issues; SelectedIssue = prepared.Issue; Details = state.Details;
+        SelectedProtocolIndex = state.SelectedProtocolIndex;
+        SelectedProtocol = prepared.Protocol;
         PacketsTab = state.PacketsTab; Query = state.Query; Start = state.Start; End = state.End;
         Probe = null; Armed = null; editOrigin = null; selectingPair = draggingEndpoint = false; Hint = ""; history.Clear();
         Notify();
@@ -105,13 +110,14 @@ public sealed class Workbench : ObservableObject
     public bool SelectionInGroup => Selected == null || IsAllSignals || Group.Decoders.Contains(Selected.Decoder);
     public string PacketSelectionContext => Selected == null ? "" : !SelectionInGroup ? "Selected packet is outside this Group."
         : PacketsTab && !MatchesSearch(Selected) ? "Selected packet is outside this search."
-        : !PacketsTab && (Selected.Span.End < Start || Selected.Span.Start > End) ? "Source is outside the time view." : "";
+        : !PacketsTab && ((SelectedProtocol?.Span ?? Selected.Span).End < Start || (SelectedProtocol?.Span ?? Selected.Span).Start > End) ? "Source is outside the time view." : "";
     public double Us(double sample) => sample / (Capture?.SampleRate ?? 50_000_000) * 1_000_000;
     public string RangeText => TimeAxis.FormatRange(Start, End, Capture?.SampleRate ?? 50_000_000);
     public void Load(Capture capture)
     {
         if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
         Capture = capture; A = B = Probe = null; PinnedMeasurement = null; Selected = null; SelectedIssue = null; Issues = capture.Issues; Details = false;
+        SelectedProtocol = null; SelectedProtocolIndex = null;
         if (!capture.Signals.Any(s => Group.Channels.Contains(s.Id)))
             Group = Groups.FirstOrDefault(g => capture.Signals.Any(s => g.Channels.Contains(s.Id))) ?? Groups.Last();
         editOrigin = null; selectingPair = draggingEndpoint = false; Armed = null; Mode = 0; Hint = ""; Query = ""; PacketsTab = false; history.Clear();
@@ -121,7 +127,15 @@ public sealed class Workbench : ObservableObject
     public void SetGroup(ObservationGroup group) { Group = group; if (Probe != null && !group.Channels.Contains(Probe.Channel)) Probe = null; if (!SelectionInGroup) Details = false; Notify(); }
     public void ShowAll() { PacketsTab = false; SetGroup(Groups.First(g => g.Name == "All signals")); }
     public void ShowAllPackets() { Query = ""; PacketsTab = true; SetGroup(Groups.First(g => g.Name == "All signals")); }
-    public void Select(Packet packet) { Selected = packet; SelectedIssue = null; Details = true; Notify(); }
+    public void Select(Packet packet) { Selected = packet; SelectedIssue = null; SelectedProtocol = null; SelectedProtocolIndex = null; Details = true; Notify(); }
+    public void SelectProtocol(Packet packet, int index)
+    {
+        if (Capture == null || !Capture.Packets.Any(p => ReferenceEquals(p, packet)) || index < 0
+            || packet.Annotations == null && !packet.HasI2cCells) return;
+        var items = Capture.ProtocolItems(packet);
+        if (index >= items.Count) return;
+        Selected = packet; SelectedIssue = null; SelectedProtocolIndex = index; SelectedProtocol = items[index]; Details = true; Notify();
+    }
     public void ShowSignal(int channel)
     {
         if (Capture?.Signals.Any(s => s.Id == channel) != true) return;
@@ -134,6 +148,7 @@ public sealed class Workbench : ObservableObject
     {
         if (!Issues.Any(i => ReferenceEquals(i, issue))) return;
         Remember(); Selected = issue.Packet; SelectedIssue = issue; Details = true; PacketsTab = false;
+        SelectedProtocol = null; SelectedProtocolIndex = null;
         Group = SourceGroup(issue.Packet.Decoder);
         var spans = issue.Diagnostic.Spans.Count > 0 ? issue.Diagnostic.Spans : [issue.Packet.Span];
         long first = spans.Min(s => s.Start), last = spans.Max(s => s.End);
@@ -145,7 +160,7 @@ public sealed class Workbench : ObservableObject
     public void SelectIssue(CaptureIssue issue)
     {
         if (!Issues.Any(i => ReferenceEquals(i, issue))) return;
-        Selected = issue.Packet; SelectedIssue = issue; Details = true; Notify();
+        Selected = issue.Packet; SelectedIssue = issue; SelectedProtocol = null; SelectedProtocolIndex = null; Details = true; Notify();
     }
     public void ToggleDetails() { Details = !Details; Notify(); }
     public void SetTab(bool packets) { PacketsTab = packets; Notify(); }
@@ -163,7 +178,11 @@ public sealed class Workbench : ObservableObject
     {
         if (Selected == null) return;
         Remember(); Group = SourceGroup(Selected.Decoder);
-        PacketsTab = false; var span = Selected.Span.End - Selected.Span.Start; SetRange(Selected.Span.Start - span * .08, Selected.Span.End + span * .08);
+        PacketsTab = false; var source = SelectedProtocol?.Span ?? Selected.Span;
+        double pad = Math.Max(10, (source.End - source.Start) * (SelectedProtocol == null ? .08 : .2));
+        SetRange(source.Start - pad, source.End + pad);
+        var channel = DSView.Domain.Capture.Decoders.FirstOrDefault(d => d.Id == Selected.Decoder)?.Channels.FirstOrDefault();
+        if (channel is int id) SignalFocusRequested?.Invoke(id);
     }
     private ObservationGroup SourceGroup(string decoderId)
     {

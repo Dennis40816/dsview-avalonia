@@ -20,6 +20,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 已提供一次一個 Group、全部通道、自訂波形線色、Hex 封包內容、高／低脈寬、完整局部週期／頻率，以及跨通道 A/B edge／位置量測。
 捲動通道時時間尺保持可見。局部頻率不代表整段資料具有穩定的時鐘頻率。
 
+選取某個 Hex byte，可在原有詳情區連結其數值、解析區間與欄位；ACK、START／STOP 各自獨立。
+Locate selected 定位該來源，Previous 返回前一視野，A/B 不變。分析檔 v2 會保存逐項選取，仍可讀取 v1。
+詳見 [協議資料選取](docs/PROTOCOL-SELECTION.md)。
+
 Activity 可比較全部已擷取通道在整段資料與目前視野的活動。
 Capture issues 依回報的解析層列出異常；Locate issue 定位其證據並保留量測標記。
 總覽顯示目前 Group 的原始訊號變化，包含未解析的控制訊號。

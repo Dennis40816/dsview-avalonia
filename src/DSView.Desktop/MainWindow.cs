@@ -59,6 +59,7 @@ public sealed partial class MainWindow : Window
     private bool updating;
     private Packet? renderedPacket;
     private CaptureIssue? renderedIssue;
+    private int? renderedProtocolIndex;
     private Flyout? openPanel;
     private readonly string preferencePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DSView2", "workbench.json");
     public MainWindow()
@@ -266,7 +267,7 @@ public sealed partial class MainWindow : Window
             if (showDetails && workspace.ColumnDefinitions[2].Width.Value == 0) { workspace.ColumnDefinitions[1].Width = new(4); workspace.ColumnDefinitions[2].Width = new(320); }
             if (!showDetails) { workspace.ColumnDefinitions[1].Width = new(0); workspace.ColumnDefinitions[2].Width = new(0); }
             inspectorBorder.IsVisible = splitter.IsVisible = showDetails; detailButton.IsVisible = Model.Selected != null && !showDetails;
-            if (showDetails && (!ReferenceEquals(renderedPacket, Model.Selected) || !ReferenceEquals(renderedIssue, Model.SelectedIssue))) { RenderInspector(); renderedPacket = Model.Selected; renderedIssue = Model.SelectedIssue; }
+            if (showDetails && (!ReferenceEquals(renderedPacket, Model.Selected) || !ReferenceEquals(renderedIssue, Model.SelectedIssue) || renderedProtocolIndex != Model.SelectedProtocolIndex)) { RenderInspector(); renderedPacket = Model.Selected; renderedIssue = Model.SelectedIssue; renderedProtocolIndex = Model.SelectedProtocolIndex; }
             packetContext.Text = Model.PacketSelectionContext;
             packetContext.IsVisible = !string.IsNullOrEmpty(packetContext.Text);
         }
@@ -350,16 +351,13 @@ public sealed partial class MainWindow : Window
     private void RenderInspector()
     {
         inspector.Children.Clear(); var packet = Model.Selected!;
+        if (!ReferenceEquals(renderedPacket, packet)) bytePage = 0;
         var heading = new Grid { ColumnDefinitions = new("*,Auto") }; Add(heading, Text(packet.Decoder.ToUpperInvariant() + " / " + packet.Id, true), 0, 0); Add(heading, Button("×", Model.ToggleDetails, "flat", "Close packet details"), 0, 1); inspector.Children.Add(heading);
         var title = Text(packet.Title); title.FontSize = 15; title.FontWeight = FontWeight.SemiBold; title.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(title);
         inspector.Children.Add(Text(TimeAxis.FormatRange(packet.Span.Start, packet.Span.End, Model.Capture!.SampleRate), true));
         packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
         inspector.Children.Add(Text(packet.Address + (packet.I2c is { AddressObserved: true } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
-        if (packet.Bytes.Length > 0)
-        {
-            inspector.Children.Add(Text("Data bytes · Hex", true));
-            inspector.Children.Add(new TextBlock { Text = packet.Hex, FontFamily = new("Cascadia Mono,Consolas"), FontSize = 15, TextWrapping = TextWrapping.Wrap });
-        }
+        RenderProtocolDetails(packet);
         if (packet.Fields.Count > 0)
         {
             inspector.Children.Add(new Separator()); inspector.Children.Add(Text("DemoFrame fields", true));
@@ -368,6 +366,8 @@ public sealed partial class MainWindow : Window
                 var row = new Grid { ColumnDefinitions = new("*,Auto") }; Add(row, Text(field.Name), 0, 0);
                 var value = field.Name == "Payload" && packet.Value is int number ? $"0x{number:X4}" : "0x" + string.Join("", field.Raw.Select(b => b.ToString("X2")));
                 var fieldValue = Text(value); fieldValue.FontFamily = new("Cascadia Mono,Consolas"); Add(row, fieldValue, 0, 1); inspector.Children.Add(row);
+                if (Model.SelectedProtocol is { Kind: "data" } part && field.Spans.Any(s => s.Start < part.Span.End && s.End > part.Span.Start))
+                { row.Background = TimelineControl.Ink("#173C39"); ToolTip.SetTip(row, "Field source overlaps the selected decoded interval"); }
                 if (Model.Issues.Any(i => ReferenceEquals(i.Packet, packet) && i.Diagnostic.Field == field.Name))
                 {
                     ((TextBlock)row.Children[0]).Text += " !"; ((TextBlock)row.Children[0]).Foreground = fieldValue.Foreground = TimelineControl.Ink("#FF9AAA");
@@ -383,7 +383,7 @@ public sealed partial class MainWindow : Window
             inspector.Children.Add(new Border { Child = diagnostic, Padding = new(12), Background = TimelineControl.Ink("#40232D"), BorderBrush = TimelineControl.Ink("#FF9AAA"), BorderThickness = new(ReferenceEquals(Model.SelectedIssue, issue) ? 1 : 0) });
         }
         if (packet.I2c != null) { var busText = Text(TimingText.I2cStatus(packet), true); busText.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(busText); }
-        inspector.Children.Add(Button("Locate source", Model.Locate));
+        if (Model.SelectedProtocol == null) inspector.Children.Add(Button("Locate source", Model.Locate));
     }
     private void ShowActivity()
     {

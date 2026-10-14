@@ -53,11 +53,19 @@ public sealed record Packet(string Id, string Decoder, SourceSpan Span, byte[] B
     public IReadOnlyList<I2cCell> WireCells { get; init; } = [];
     // Non-null means explicit observed protocol events; never synthesize boundaries.
     public IReadOnlyList<ProtocolAnnotation>? Annotations { get; init; }
+    public bool HasI2cCells => Decoder == "i2c" && WireCells.Count == Bytes.Length + 1
+        && WireCells.All(c => c.Data.Start >= 0 && c.Data.Start < c.Data.End && c.Acknowledge.Start >= c.Data.End && c.Acknowledge.End > c.Acknowledge.Start)
+        && WireCells.Zip(WireCells.Skip(1)).All(p => p.First.Acknowledge.End <= p.Second.Data.Start);
     public string Direction => I2c is not { AddressObserved: true } ? "?" : I2c.Read ? "R" : "W";
     public string Hex => string.Join(" ", Bytes.Select(b => b.ToString("X2")));
     public override string ToString() => $"{Id} · {Decoder.ToUpperInvariant()} · {Hex} · {Error ?? Title}";
 }
-public sealed record ProtocolItem(Packet Packet, string Label, SourceSpan Span, string Kind);
+public sealed record ProtocolItem(Packet Packet, string Label, SourceSpan Span, string Kind)
+{
+    public int? DataIndex { get; init; }
+    public bool IsAddress { get; init; }
+    public string Identity => DataIndex is int index ? $"Data byte {index + 1} · {Label}" : IsAddress ? "Address · " + Label : Label;
+}
 public sealed record Decoder(string Id, string Name, int[] Channels);
 public sealed record ObservationGroup(string Name, int[] Channels, string[] Decoders)
 {
@@ -173,8 +181,27 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
     public IReadOnlyList<ProtocolItem> ProtocolItems(Packet packet)
     {
         if (packet.Annotations is { } observed)
-            return observed.Select(item => new ProtocolItem(packet, item.Label, item.Span, item.Kind)).ToArray();
-        if (packet.Decoder != "i2c" || packet.WireCells.Count != packet.Bytes.Length + 1)
+        {
+            // Recognize the adapter's complete ordered I²C byte sequence. Labels validate
+            // the association; the element ordinal, never its value, identifies selection.
+            var data = observed.Where(a => a.Kind == "data").ToArray();
+            bool address = packet.I2c is { AddressObserved: true };
+            int prefix = address ? 1 : 0;
+            bool mapped = packet.Decoder == "i2c" && data.Length == packet.Bytes.Length + prefix
+                && (!address || data[0].Label == packet.Address + " " + packet.Direction)
+                && packet.Bytes.Select((b, i) => data[i + prefix].Label == $"0x{b:X2}").All(match => match)
+                && data.All(a => a.Span.Start >= 0 && a.Span.Start < a.Span.End)
+                && observed.Zip(observed.Skip(1)).All(p => p.First.Span.Start <= p.Second.Span.Start)
+                && data.Zip(data.Skip(1)).All(p => p.First.Span.End <= p.Second.Span.Start);
+            int ordinal = 0;
+            return observed.Select(item =>
+            {
+                int current = item.Kind == "data" ? ordinal++ : -1;
+                return new ProtocolItem(packet, item.Label, item.Span, item.Kind)
+                { DataIndex = mapped && current >= prefix ? current - prefix : null, IsAddress = mapped && address && current == 0 };
+            }).ToArray();
+        }
+        if (!packet.HasI2cCells)
             return [new(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
         // Explicit synthetic annotations, not a live protocol decoder. Never infer bit time from sample rate.
         var result = new List<ProtocolItem> { new(packet, "START", new(packet.Span.Start, packet.Span.Start), "point") };
@@ -182,7 +209,7 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
         for (int i = 0; i < packet.WireCells.Count; i++)
         {
             var cell = packet.WireCells[i];
-            result.Add(new(packet, i == 0 ? packet.Address + " " + packet.Direction : $"0x{packet.Bytes[i - 1]:X2}", cell.Data, "data"));
+            result.Add(new ProtocolItem(packet, i == 0 ? packet.Address + " " + packet.Direction : $"0x{packet.Bytes[i - 1]:X2}", cell.Data, "data") { DataIndex = i == 0 ? null : i - 1, IsAddress = i == 0 });
             result.Add(new(packet, Ack(i), cell.Acknowledge, "ack"));
         }
         result.Add(new(packet, "STOP", new(packet.Span.End, packet.Span.End), "point"));

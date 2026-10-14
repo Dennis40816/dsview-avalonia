@@ -26,6 +26,11 @@ complete-cycle period/frequency, and cross-channel A/B edge or position timing.
 The time ruler stays visible while scrolling channels. A local frequency is not
 a claim of a stable capture-wide clock.
 
+Select a decoded byte to connect its Hex value, annotated interval and fields
+in the existing inspector. ACK and START/STOP stay separate. Locate selected
+frames that evidence while preserving A/B; Previous returns to the earlier
+view. See [protocol selection](docs/PROTOCOL-SELECTION.md).
+
 Activity compares every captured channel over the full recording and current
 time view. Capture issues lists diagnostics by their reported decoder layer;
 Locate issue frames its evidence while retaining timing markers. The overview

@@ -25,7 +25,7 @@ public static class AnalysisFile
             if (info.Kind != JsonTypeInfoKind.Object) return;
             for (int i = info.Properties.Count - 1; i >= 0; i--)
                 if (info.Properties[i].Set == null) info.Properties.RemoveAt(i); // Also excludes read-only collections such as Capture.Issues.
-                else info.Properties[i].IsRequired = true; // A missing gap/initial/completion must not silently become a default.
+                else info.Properties[i].IsRequired = !(info.Type == typeof(AnalysisState) && info.Properties[i].Name == "selectedProtocolIndex"); // Only the additive presentation selection is optional; evidence remains required.
         });
         return resolver;
     }
@@ -43,6 +43,7 @@ public static class AnalysisFile
     public static Task WriteAsync(string path, AnalysisDocument document, CancellationToken cancellation = default) => Task.Run(async () =>
     {
         Validate(document, cancellation);
+        document = document with { Version = AnalysisDocument.CurrentVersion };
         string destination = Path.GetFullPath(path);
         string temporary = Path.Combine(Path.GetDirectoryName(destination)!, ".dsview2-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
@@ -82,7 +83,7 @@ public static class AnalysisFile
         static void Require([DoesNotReturnIf(false)] bool condition, string message) { if (!condition) throw new InvalidDataException(message); }
         static bool Text(string? value, int maximum = 4096) => value != null && value.Length <= maximum && !value.Any(c => char.IsControl(c) && c is not ('\n' or '\r' or '\t'));
         static bool Name(string? value, int maximum = 128) => Text(value, maximum) && !string.IsNullOrWhiteSpace(value);
-        Require(document != null && document.Format == AnalysisDocument.FileFormat && document.Version == AnalysisDocument.CurrentVersion, "Unsupported analysis format or version.");
+        Require(document != null && document.Format == AnalysisDocument.FileFormat && document.Version is 1 or AnalysisDocument.CurrentVersion, "Unsupported analysis format or version.");
         Require(Name(document!.SourceName), "Invalid source name.");
         var capture = document.Capture; var state = document.State;
         Require(capture != null && state != null, "Capture or analysis state is missing.");
@@ -158,6 +159,13 @@ public static class AnalysisFile
         Require(state.SelectedPacket == null || packetIds.Contains(state.SelectedPacket), "Selected packet is missing.");
         Require(!state.Details || state.SelectedPacket != null, "Packet detail has no selection.");
         Require(state.SelectedIssue == null || capture.Issues.Any(i => i.Packet.Id == state.SelectedPacket && i.Diagnostic.Id == state.SelectedIssue), "Selected diagnostic is missing.");
+        if (state.SelectedProtocolIndex is int selectedIndex)
+        {
+            var packet = capture.Packets.FirstOrDefault(p => p.Id == state.SelectedPacket);
+            Require(document.Version >= 2 && state.SelectedIssue == null && packet != null &&
+                (packet.Annotations != null || packet.HasI2cCells)
+                && selectedIndex >= 0 && selectedIndex < capture.ProtocolItems(packet).Count, "Selected protocol element is missing or ambiguous.");
+        }
         var channels = state.ActiveGroup == "All signals" ? ids : state.Groups.First(g => g.Name == state.ActiveGroup).Channels.Where(ids.Contains).ToHashSet();
         Require(state.EdgeChannel == null || channels.Contains(state.EdgeChannel.Value), "Edge navigation source is outside the saved Group.");
         Require(state.Vertical != null && double.IsFinite(state.Vertical.Offset) && state.Vertical.Offset >= 0 && (state.Vertical.Channel == null ? state.Vertical.Offset <= 200 : channels.Contains(state.Vertical.Channel.Value) && state.Vertical.Offset < 52), "Invalid vertical source anchor.");

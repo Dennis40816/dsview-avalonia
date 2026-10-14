@@ -16,7 +16,7 @@ public sealed class TimelineControl : Control
     private readonly Workbench model;
     private readonly bool overview;
     private readonly bool rulerOnly;
-    private readonly List<(Rect Bounds, Packet Packet)> hits = [];
+    private readonly List<(Rect Bounds, Packet Packet, int? Index)> hits = [];
     private Point press;
     private double pressStart, pressEnd;
     private bool down, dragged;
@@ -216,19 +216,20 @@ public sealed class TimelineControl : Control
             {
                 var protocol = model.Capture.ProtocolItems(packet);
                 bool pointsOnly = packet.Annotations != null && protocol.All(item => item.Kind == "point");
-                bool detailed = pointsOnly || (packet.Annotations != null || packet.WireCells.Count > 0) && protocol.Any(item => item.Kind == "data" && (item.Span.End - item.Span.Start) / (model.End - model.Start) * PlotWidth >= 43);
+                bool detailed = pointsOnly || (packet.Annotations != null || packet.HasI2cCells) && protocol.Any(item => item.Kind == "data" && (item.Span.End - item.Span.Start) / (model.End - model.Start) * PlotWidth >= 43);
                 var items = detailed ? protocol : [new ProtocolItem(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
-                foreach (var item in items)
+                foreach (var (item, itemIndex) in items.Select((item, itemIndex) => (item, itemIndex)))
                 {
                     if (item.Span.End < model.Start || item.Span.Start > model.End) continue;
                     var left = Math.Max(LabelWidth, X(item.Span.Start)); var right = Math.Min(LabelWidth + PlotWidth, X(item.Span.End));
                     var width = Math.Max(1, right - left); var rect = new Rect(left, y + 5, width, 26);
+                    bool selectedItem = detailed && model.Selected == packet && model.SelectedProtocolIndex == itemIndex;
                     if (item.Kind == "point")
                     {
-                        context.DrawLine(new Pen(Muted, 1), new(left, y + 3), new(left, y + 32));
+                        context.DrawLine(new Pen(selectedItem ? Accent : Muted, selectedItem ? 2 : 1), new(left, y + 3), new(left, y + 32));
                         string pointLabel = item.Label switch { "START" => "S", "RESTART" or "START REPEAT" => "Sr", "STOP" => "P", _ => item.Label };
                         Label(context, pointLabel, Math.Clamp(left + 2, LabelWidth, LabelWidth + PlotWidth - 18), y + 10, Muted, 11);
-                        hits.Add((new(left - 5, y, 14, 36), packet)); continue;
+                        hits.Add((new(left - 5, y, 14, 36), packet, detailed ? itemIndex : null)); continue;
                     }
                     IBrush fill = item.Kind == "ack" ? Ink("#25303A") : Ink(model.Selected == packet ? "#245A53" : "#254347");
                     if (item.Kind == "ack" || width < 10) context.FillRectangle(fill, rect);
@@ -242,8 +243,9 @@ public sealed class TimelineControl : Control
                             g.BeginFigure(new(left + lc, y + 5), true); g.LineTo(new(right - rc, y + 5)); g.LineTo(new(right, y + 18));
                             g.LineTo(new(right - rc, y + 31)); g.LineTo(new(left + lc, y + 31)); g.LineTo(new(left, y + 18)); g.EndFigure(true);
                         }
-                        context.DrawGeometry(fill, null, geometry);
+                        context.DrawGeometry(fill, selectedItem ? new Pen(Accent, 1.5) : null, geometry);
                     }
+                    if (selectedItem && (item.Kind == "ack" || width < 10)) context.DrawRectangle(null, new Pen(Accent, 1.5), rect);
                     string label = item.Label;
                     if (item.Kind == "ack" && width < 32) label = item.Label == "ACK" ? "A" : item.Label == "NACK" ? "N" : "?";
                     var ft = Format(label, item.Kind == "ack" ? Muted : Ink("#C9F1EA"), item.Kind == "ack" ? 12 : 13, true);
@@ -252,7 +254,7 @@ public sealed class TimelineControl : Control
                     if (ft.Width > width - 6 && !detailed && item.Kind == "data")
                         ft = Format(packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction : $"{packet.Bytes.Length} B", Ink("#C9F1EA"), 13, true);
                     if (ft.Width <= width - 6) context.DrawText(ft, new(left + (width - ft.Width) / 2, y + 5 + (26 - ft.Height) / 2));
-                    hits.Add((rect, packet));
+                    hits.Add((rect, packet, detailed ? itemIndex : null));
                 }
                 foreach (var issue in model.Issues.Where(i => ReferenceEquals(i.Packet, packet)))
                 foreach (var source in issue.Diagnostic.Spans.DefaultIfEmpty(packet.Span))
@@ -270,8 +272,11 @@ public sealed class TimelineControl : Control
         context.DrawLine(new Pen(GridInk, 1), new(0, SignalsTop - 7), new(Bounds.Width, SignalsTop - 7));
         if (model.Selected is { } selected && model.SelectionInGroup)
         {
-            var left = Math.Max(LabelWidth, X(selected.Span.Start)); var right = Math.Min(LabelWidth + PlotWidth, X(selected.Span.End));
+            var source = model.SelectedProtocol?.Span ?? selected.Span;
+            var left = Math.Max(LabelWidth, X(source.Start)); var right = Math.Min(LabelWidth + PlotWidth, X(source.End));
             if (right > left) context.FillRectangle(Ink("#132B2C"), new(left, SignalsTop, right - left, model.Signals.Count * RowHeight));
+            else if (source.Start == source.End && source.Start >= model.Start && source.Start <= model.End)
+                context.DrawLine(new Pen(Accent, 1, DashStyle.Dash), new(left, SignalsTop), new(left, SignalsTop + model.Signals.Count * RowHeight));
         }
         foreach (var (signal, index) in model.Signals.Select((s, i) => (s, i)))
         {
@@ -452,7 +457,7 @@ public sealed class TimelineControl : Control
             var issue = issueHits.FirstOrDefault(h => h.Bounds.Contains(p)).Issue;
             var hit = hits.FirstOrDefault(h => h.Bounds.Contains(p));
             if (issue != null) model.SelectIssue(issue);
-            else if (hit.Packet != null) model.Select(hit.Packet);
+            else if (hit.Packet != null) { if (hit.Index is int index) model.SelectProtocol(hit.Packet, index); else model.Select(hit.Packet); }
             else if (ChannelAt(p.Y) is int channel) model.Pick(channel, Sample(p.X), (model.End - model.Start) / PlotWidth * 8);
         }
         dragEndpoint = null; e.Handled = true;
