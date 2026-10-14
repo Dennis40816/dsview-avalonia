@@ -29,7 +29,9 @@ edge timing. Existing generated examples remain synthetic sources.
 
 The inspector creates at most 64 byte controls at once and offers additional
 pages when needed. Keyboard focus returns to a byte after selecting it in the
-inspector. The selected protocol element is saved in analysis format version 2.
-Version 1 documents reopen at packet level and are upgraded on Save. Older
-applications reject version 2; keep an original file if it is needed by an older
-development build.
+inspector. Selected protocol elements were introduced in analysis format
+version 2. The current writer uses version 3, which also retains named timing
+results. Version 1 documents reopen at packet level; versions 1 and 2 remain
+readable and are upgraded to version 3 on Save. Older development builds
+reject version 3, so keep an original file if it is needed by an older build.
+See [Analysis files](ANALYSIS-FILES.md) for compatibility details.
