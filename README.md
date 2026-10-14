@@ -23,6 +23,11 @@ complete-cycle period/frequency, and cross-channel A/B edge or position timing.
 The time ruler stays visible while scrolling channels. A local frequency is not
 a claim of a stable capture-wide clock.
 
+Activity compares every captured channel over the full recording and current
+time view. Capture issues lists diagnostics by their reported decoder layer;
+Locate issue frames its evidence while retaining timing markers. The overview
+shows observed raw transitions in the current Group, including control signals.
+
 ## Run the offline workbench
 
 Use the .NET SDK pinned by `global.json` (10.0.303, with latest-patch roll-forward):
@@ -44,6 +49,10 @@ it. Use Measure A/B to choose two references, or choose Position for sample-grid
 locations. Escape cancels a pending selection or numeric edit. Ctrl + wheel
 zooms and dragging empty waveform space pans. Select a packet for its content;
 Locate source explicitly changes the time view. Fit time shows the whole recording.
+
+Show in the Activity panel reveals a channel without changing the time range.
+Explicit source/issue navigation can create a source Group if custom Groups no
+longer contain the decoder's required channels.
 
 The physical probe swatch is fixed. Click the separate short line beside a
 signal name to customize its waveform color. Group/color preferences are saved

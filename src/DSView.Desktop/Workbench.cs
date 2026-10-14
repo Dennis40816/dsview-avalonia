@@ -20,6 +20,9 @@ public sealed class Workbench : ObservableObject
     public int Mode { get; private set; }
     public int? Armed { get; private set; }
     public Packet? Selected { get; private set; }
+    public CaptureIssue? SelectedIssue { get; private set; }
+    public IReadOnlyList<CaptureIssue> Issues { get; private set; } = [];
+    public event Action<int>? SignalFocusRequested;
     public bool Details { get; private set; }
     public bool PacketsTab { get; private set; }
     public string Hint { get; private set; } = "";
@@ -50,14 +53,39 @@ public sealed class Workbench : ObservableObject
     public void Load(Capture capture)
     {
         if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
-        Capture = capture; A = B = null; PinnedMeasurement = null; Selected = null; Details = false;
+        Capture = capture; A = B = null; PinnedMeasurement = null; Selected = null; SelectedIssue = null; Issues = capture.Issues; Details = false;
         editOrigin = null; selectingPair = false; Armed = null; Mode = 0; Hint = ""; history.Clear();
         SetRange(0, capture.SampleCount);
     }
     public void Notify() { OnPropertyChanged(string.Empty); Changed?.Invoke(); }
     public void SetGroup(ObservationGroup group) { Group = group; if (!SelectionInGroup) Details = false; Notify(); }
     public void ShowAll() { PacketsTab = false; SetGroup(Groups.First(g => g.Name == "All signals")); }
-    public void Select(Packet packet) { Selected = packet; Details = true; Notify(); }
+    public void Select(Packet packet) { Selected = packet; SelectedIssue = null; Details = true; Notify(); }
+    public void ShowSignal(int channel)
+    {
+        if (Capture?.Signals.Any(s => s.Id == channel) != true) return;
+        Remember();
+        if (!Group.Channels.Contains(channel)) Group = Groups.FirstOrDefault(g => g.Channels.Contains(channel)) ?? Group;
+        PacketsTab = false; if (!SelectionInGroup) Details = false;
+        Notify(); SignalFocusRequested?.Invoke(channel);
+    }
+    public void LocateIssue(CaptureIssue issue)
+    {
+        if (!Issues.Any(i => ReferenceEquals(i, issue))) return;
+        Remember(); Selected = issue.Packet; SelectedIssue = issue; Details = true; PacketsTab = false;
+        Group = SourceGroup(issue.Packet.Decoder);
+        var spans = issue.Diagnostic.Spans.Count > 0 ? issue.Diagnostic.Spans : [issue.Packet.Span];
+        long first = spans.Min(s => s.Start), last = spans.Max(s => s.End);
+        double pad = Math.Max(10, (last - first) * .2);
+        SetRange(first - pad, last + pad);
+        var source = DSView.Domain.Capture.Decoders.FirstOrDefault(d => d.Id == issue.Packet.Decoder)?.Channels.FirstOrDefault();
+        if (source is int channel) SignalFocusRequested?.Invoke(channel);
+    }
+    public void SelectIssue(CaptureIssue issue)
+    {
+        if (!Issues.Any(i => ReferenceEquals(i, issue))) return;
+        Selected = issue.Packet; SelectedIssue = issue; Details = true; Notify();
+    }
     public void ToggleDetails() { Details = !Details; Notify(); }
     public void SetTab(bool packets) { PacketsTab = packets; Notify(); }
     public void Search(string value) { Query = value; Notify(); }
@@ -73,8 +101,19 @@ public sealed class Workbench : ObservableObject
     public void Locate()
     {
         if (Selected == null) return;
-        Remember(); Group = Groups.FirstOrDefault(g => g.Decoders.Contains(Selected.Decoder)) ?? Group;
+        Remember(); Group = SourceGroup(Selected.Decoder);
         PacketsTab = false; var span = Selected.Span.End - Selected.Span.Start; SetRange(Selected.Span.Start - span * .08, Selected.Span.End + span * .08);
+    }
+    private ObservationGroup SourceGroup(string decoderId)
+    {
+        var decoder = DSView.Domain.Capture.Decoders.FirstOrDefault(d => d.Id == decoderId);
+        var existing = Groups.FirstOrDefault(g => g.Decoders.Contains(decoderId) && (decoder == null || decoder.Channels.All(g.Channels.Contains)));
+        if (existing != null) return existing;
+        if (decoder == null) return Groups.First(g => g.Name == "All signals");
+        // A user may have removed the source decoder from every saved Group. Explicit Locate must still reveal it.
+        string name = decoder.Name + " source"; int suffix = 2;
+        while (Groups.Any(g => g.Name == name)) name = decoder.Name + " source " + suffix++;
+        var source = new ObservationGroup(name, decoder.Channels, [decoderId]); Groups.Insert(Math.Max(0, Groups.Count - 1), source); return source;
     }
     private void BeginEdit() { editOrigin ??= (A, B, Mode, PinnedMeasurement); }
     public void SetMode(int mode) { BeginEdit(); selectingPair = mode != 0; Mode = mode; Armed = mode == 0 ? null : 0; Hint = mode == 0 ? "" : "Choose A, then B on any signal. Esc cancels."; Notify(); }
@@ -99,7 +138,7 @@ public sealed class Workbench : ObservableObject
         }
         int? target = replacing ?? Armed;
         if (target == null) { Hint = "Choose A or B to replace an endpoint, or drag an existing cursor."; Notify(); return; }
-        var edge = signal.Nearest(sample);
+        var edge = Capture!.NearestObservedEdge(signal, sample);
         if (Mode != 2 && (edge == null || Math.Abs(edge.Sample - sample) > tolerance || edge.Sample < Start || edge.Sample > End))
         { Hint = "No nearby edge. Zoom in or use A/B position."; Notify(); return; }
         if (replacing != null && Mode == 0) Mode = 1;
@@ -132,7 +171,7 @@ public sealed class Workbench : ObservableObject
     {
         var signal = Capture?.Signals.First(s => s.Id == channel); if (signal == null) return;
         var center = (Start + End) / 2;
-        Edge? edge = direction > 0 ? signal.Edges.FirstOrDefault(e => e.Sample > center + 1) : signal.Edges.LastOrDefault(e => e.Sample < center - 1);
+        Edge? edge = direction > 0 ? signal.Edges.FirstOrDefault(e => e.Sample > center + 1 && Capture!.HasSample(e.Sample)) : signal.Edges.LastOrDefault(e => e.Sample < center - 1 && Capture!.HasSample(e.Sample));
         if (edge == null) { Hint = "No further edge in this capture."; Notify(); return; }
         Remember(); var span = End - Start; SetRange(edge.Sample - span / 2, edge.Sample + span / 2);
     }

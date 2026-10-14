@@ -9,6 +9,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using DSView.Domain;
 using DSView.Infrastructure;
 
@@ -20,7 +21,7 @@ public sealed class MainWindow : Window
     private readonly ComboBox groupPicker = new() { MinWidth = 205 };
     private readonly ComboBox modePicker = new() { ItemsSource = new[] { "Snap to edge", "Position" }, SelectedIndex = 0, Width = 134 };
     private readonly ComboBox edgeChannel = new() { Width = 74 };
-    private readonly TextBlock range = Text(""), groupSummary = Text("", true), status = Text("Loading…", true), hint = Text("", true), delta = Text("");
+    private readonly TextBlock range = Text(""), status = Text("Loading…", true), hint = Text("", true), delta = Text("");
     private readonly TextBox aTime = new() { Width = 95 }, bTime = new() { Width = 95 };
     private readonly TextBlock aSource = Text("A", true), bSource = Text("B", true);
     private readonly TextBlock packetContext = Text("", true);
@@ -34,7 +35,7 @@ public sealed class MainWindow : Window
     private readonly Grid workspace = new() { ColumnDefinitions = new("*,0,0") };
     private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), FontSize = 12, Background = Brushes.Transparent };
     private readonly TextBox search = new() { PlaceholderText = "Search packets, Hex or fields", Margin = new(14, 8) };
-    private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton;
+    private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton, activityButton, issuesButton;
     private readonly Control wavePanel, packetPanel;
     private readonly Border inspectorBorder;
     private readonly GridSplitter splitter = new() { Width = 4, Background = TimelineControl.Ink("#26343F"), ResizeDirection = GridResizeDirection.Columns };
@@ -42,6 +43,8 @@ public sealed class MainWindow : Window
     private int generation;
     private bool updating;
     private Packet? renderedPacket;
+    private CaptureIssue? renderedIssue;
+    private Flyout? openPanel;
     private readonly string preferencePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DSView2", "workbench.json");
     public MainWindow()
     {
@@ -50,19 +53,21 @@ public sealed class MainWindow : Window
         RestorePreferences();
         workspace.ColumnDefinitions[0].MinWidth = 640;
         var page = new Grid { RowDefinitions = new("44,44,Auto,Auto,*") };
-        var header = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,*,Auto"), Margin = new(16, 0) };
+        var header = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,*,Auto,Auto"), Margin = new(16, 0) };
         var brand = Text("DSView2"); brand.FontWeight = FontWeight.SemiBold; brand.Margin = new(0, 0, 20, 0);
         Add(header, brand, 0, 0);
         waveTab = Button("Waveforms", () => Model.SetTab(false), "flat"); packetTab = Button("Packets", () => Model.SetTab(true), "flat");
         Add(header, waveTab, 0, 1); Add(header, packetTab, 0, 2);
         var source = Button("", ShowInfo, "flat", "Capture source and acquisition details"); source.Content = status; source.HorizontalAlignment = HorizontalAlignment.Right; Add(header, source, 0, 3);
-        reloadButton = Button("Reload demo", async () => await LoadAsync()); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 4);
+        issuesButton = Button("Capture issues", ShowIssues, "flat", "Diagnostics across the entire capture, independent of Group and packet search"); issuesButton.Foreground = TimelineControl.Ink("#FF9AAA"); Add(header, issuesButton, 0, 4);
+        reloadButton = Button("Reload demo", async () => await LoadAsync()); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
         Add(page, Band(header), 0);
         var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto"), Margin = new(16, 0) };
         Add(groupBar, Text("Group", true), 0, 0); groupPicker.Margin = new(10, 0); groupPicker.ItemsSource = Model.Groups; groupPicker.SelectedItem = Model.Group;
         groupPicker.SelectionChanged += (_, _) => { if (!updating && groupPicker.SelectedItem is ObservationGroup group) Model.SetGroup(group); };
         Add(groupBar, groupPicker, 0, 1); Add(groupBar, Button("Edit", () => EditGroup(false), "flat", "Edit signal group"), 0, 2);
-        Add(groupBar, Button("All signals", Model.ShowAll, "flat"), 0, 3); groupSummary.Margin = new(12, 0); Add(groupBar, groupSummary, 0, 4);
+        Add(groupBar, Button("All signals", Model.ShowAll, "flat"), 0, 3);
+        activityButton = Button("Activity", ShowActivity, "flat", "All captured channels: full-capture activity compared with the current time view"); activityButton.HorizontalAlignment = HorizontalAlignment.Left; Add(groupBar, activityButton, 0, 4);
         detailButton = Button("Packet details", Model.ToggleDetails, "flat"); Add(groupBar, detailButton, 0, 5);
         measureButton = Button("Measure A/B", () => Model.SetMode(1), "flat", "Choose two edges or positions, on any channels"); Add(groupBar, measureButton, 0, 6); Add(page, Band(groupBar), 1);
         var nav = navigation;
@@ -74,6 +79,7 @@ public sealed class MainWindow : Window
         var guide = Text("Hover to measure · Ctrl + wheel to zoom", true); guide.HorizontalAlignment = HorizontalAlignment.Right; Add(nav, guide, 0, 9); Add(page, nav, 2);
         overview = new TimelineControl(Model, true); Add(page, overview, 3);
         var timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
+        Model.SignalFocusRequested += channel => Dispatcher.UIThread.Post(() => timeline.RevealSignal(channel), DispatcherPriority.Loaded);
         var ruler = new TimelineControl(Model, isRuler: true) { HorizontalAlignment = HorizontalAlignment.Left };
         timeline.SizeChanged += (_, _) => ruler.Width = timeline.Bounds.Width;
         var waveformGrid = new Grid { RowDefinitions = new("42,Auto,*") };
@@ -129,7 +135,10 @@ public sealed class MainWindow : Window
         if (updating) return; updating = true;
         try
         {
-            groupPicker.SelectedItem = Model.Group; groupSummary.Text = $"{Model.Signals.Count} of {Model.Capture?.Signals.Count ?? 0} captured";
+            openPanel?.Hide(); openPanel = null;
+            groupPicker.SelectedItem = Model.Group; activityButton.Content = $"Activity · {Model.Capture?.Signals.Count ?? 0} signals";
+            AutomationProperties.SetName(activityButton, $"Activity · {Model.Signals.Count} visible of {Model.Capture?.Signals.Count ?? 0} captured signals");
+            issuesButton.Content = $"Capture issues · {Model.Issues.Count}"; issuesButton.IsVisible = Model.Issues.Count > 0;
             range.Text = Model.RangeText;
             var old = edgeChannel.SelectedItem as string; var choices = Model.Group.Channels.Select(c => $"D{c}").ToArray();
             if (!(edgeChannel.ItemsSource?.Cast<string>().SequenceEqual(choices) ?? false)) { edgeChannel.ItemsSource = choices; edgeChannel.SelectedItem = choices.Contains(old) ? old : choices.FirstOrDefault(); }
@@ -161,7 +170,7 @@ public sealed class MainWindow : Window
             if (showDetails && workspace.ColumnDefinitions[2].Width.Value == 0) { workspace.ColumnDefinitions[1].Width = new(4); workspace.ColumnDefinitions[2].Width = new(320); }
             if (!showDetails) { workspace.ColumnDefinitions[1].Width = new(0); workspace.ColumnDefinitions[2].Width = new(0); }
             inspectorBorder.IsVisible = splitter.IsVisible = showDetails; detailButton.IsVisible = Model.Selected != null && !showDetails;
-            if (showDetails && !ReferenceEquals(renderedPacket, Model.Selected)) { RenderInspector(); renderedPacket = Model.Selected; }
+            if (showDetails && (!ReferenceEquals(renderedPacket, Model.Selected) || !ReferenceEquals(renderedIssue, Model.SelectedIssue))) { RenderInspector(); renderedPacket = Model.Selected; renderedIssue = Model.SelectedIssue; }
             packetContext.Text = !Model.SelectionInGroup ? "Source signals are outside this group" : Model.Selected is { } p && (p.Span.End < Model.Start || p.Span.Start > Model.End) ? "Source is outside the time view" : "";
             packetContext.IsVisible = !Model.PacketsTab && !string.IsNullOrEmpty(packetContext.Text);
         }
@@ -192,7 +201,7 @@ public sealed class MainWindow : Window
         var title = Text(packet.Title); title.FontSize = 15; title.FontWeight = FontWeight.SemiBold; title.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(title);
         inspector.Children.Add(Text($"{Model.Us(packet.Span.Start):0.##}–{Model.Us(packet.Span.End):0.##} µs", true));
         packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
-        inspector.Children.Add(Text(packet.Address + (packet.Decoder == "i2c" ? " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
+        inspector.Children.Add(Text(packet.Address + (packet.I2c is { } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
         inspector.Children.Add(Text("Data bytes · Hex", true));
         inspector.Children.Add(new TextBlock { Text = packet.Hex, FontFamily = new("Cascadia Mono,Consolas"), FontSize = 15, TextWrapping = TextWrapping.Wrap });
         if (packet.Fields.Count > 0)
@@ -203,15 +212,57 @@ public sealed class MainWindow : Window
                 var row = new Grid { ColumnDefinitions = new("*,Auto") }; Add(row, Text(field.Name), 0, 0);
                 var value = field.Name == "Payload" && packet.Value is int number ? $"0x{number:X4}" : "0x" + string.Join("", field.Raw.Select(b => b.ToString("X2")));
                 var fieldValue = Text(value); fieldValue.FontFamily = new("Cascadia Mono,Consolas"); Add(row, fieldValue, 0, 1); inspector.Children.Add(row);
+                if (Model.Issues.Any(i => ReferenceEquals(i.Packet, packet) && i.Diagnostic.Field == field.Name))
+                {
+                    ((TextBlock)row.Children[0]).Text += " !"; ((TextBlock)row.Children[0]).Foreground = fieldValue.Foreground = TimelineControl.Ink("#FF9AAA");
+                }
             }
         }
-        if (packet.Error != null)
+        foreach (var issue in Model.Issues.Where(i => ReferenceEquals(i.Packet, packet)))
         {
-            var error = new TextBlock { Text = (packet.Decoder == "i2c" ? "DemoFrame · " : "") + packet.Error, TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#FF9AAA") };
-            inspector.Children.Add(new Border { Child = error, Padding = new(12), Background = TimelineControl.Ink("#40232D") });
+            var diagnostic = new StackPanel { Spacing = 6 };
+            diagnostic.Children.Add(new TextBlock { Text = issue.Diagnostic.Layer + " · " + issue.Diagnostic.Message, TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#FF9AAA") });
+            diagnostic.Children.Add(Text(issue.Diagnostic.Field is { } field ? $"Evidence · {field}" : "Evidence · annotated packet", true));
+            diagnostic.Children.Add(Button("Locate issue", () => Model.LocateIssue(issue), "flat", "Locate the diagnostic evidence, preserving timing markers"));
+            inspector.Children.Add(new Border { Child = diagnostic, Padding = new(12), Background = TimelineControl.Ink("#40232D"), BorderBrush = TimelineControl.Ink("#FF9AAA"), BorderThickness = new(ReferenceEquals(Model.SelectedIssue, issue) ? 1 : 0) });
         }
-        if (packet.Decoder == "i2c") inspector.Children.Add(Text("I²C · Address + data ACK", true));
+        if (packet.I2c is { } bus) inspector.Children.Add(Text(bus.Acknowledged.Count == packet.Bytes.Length + 1 && bus.Acknowledged.All(a => a == true) ? "I²C · Address + data ACK" : "I²C · Inspect ACK / NACK evidence", true));
         inspector.Children.Add(Button("Locate source", Model.Locate));
+    }
+    private void ShowActivity()
+    {
+        if (Model.Capture is not { } capture) return;
+        var body = new StackPanel { Spacing = 10, Width = 570 };
+        body.Children.Add(Text("Signal activity · all captured channels"));
+        body.Children.Add(Text($"Full capture compared with {Model.RangeText}", true));
+        var rows = new StackPanel { Spacing = 5 };
+        var heading = new Grid { ColumnDefinitions = new("185,150,150,Auto") };
+        Add(heading, Text("Signal", true), 0, 0); Add(heading, Text("Full capture", true), 0, 1); Add(heading, Text("Current view", true), 0, 2); body.Children.Add(heading);
+        foreach (var signal in capture.Signals)
+        {
+            var row = new Grid { ColumnDefinitions = new("185,150,150,Auto") };
+            var name = Text($"D{signal.Id}  {signal.Name}"); name.TextWrapping = TextWrapping.Wrap; name.Margin = new(0, 0, 8, 0); Add(row, name, 0, 0);
+            var full = Text(ActivityText.Full(capture.Activity(signal.Id, 0, capture.SampleCount)), true); full.TextWrapping = TextWrapping.Wrap; full.Margin = new(0, 0, 8, 0); Add(row, full, 0, 1);
+            var view = Text(ActivityText.Full(capture.Activity(signal.Id, (long)Math.Ceiling(Model.Start), (long)Math.Ceiling(Model.End))), true); view.TextWrapping = TextWrapping.Wrap; view.Margin = new(0, 0, 8, 0); Add(row, view, 0, 2);
+            var show = Button("Show", () => Model.ShowSignal(signal.Id), "flat", "Reveal this channel without changing time"); AutomationProperties.SetName(show, $"Show D{signal.Id} {signal.Name}"); Add(row, show, 0, 3); rows.Children.Add(row);
+        }
+        body.Children.Add(new ScrollViewer { Content = rows, MaxHeight = 360, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
+        openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(activityButton);
+    }
+    private void ShowIssues()
+    {
+        var body = new StackPanel { Spacing = 14, Width = 420 };
+        body.Children.Add(Text($"Capture issues · {Model.Issues.Count}")); body.Children.Add(Text("Entire capture · all decoder layers", true));
+        var rows = new StackPanel { Spacing = 12 };
+        foreach (var issue in Model.Issues)
+        {
+            var row = new StackPanel { Spacing = 5 };
+            var label = Text(issue.Diagnostic.Layer + " · " + issue.Diagnostic.Message); label.TextWrapping = TextWrapping.Wrap; row.Children.Add(label);
+            var span = issue.Diagnostic.Spans.FirstOrDefault() ?? issue.Packet.Span;
+            row.Children.Add(Text($"{issue.Packet.Id} · {Model.Us(span.Start):0.##}–{Model.Us(span.End):0.##} µs · " + (issue.Diagnostic.Field ?? "packet evidence"), true));
+            var locate = Button("Locate issue", () => Model.LocateIssue(issue), "flat"); AutomationProperties.SetName(locate, $"Locate issue {issue.Diagnostic.Layer} {issue.Diagnostic.Message}"); row.Children.Add(locate); rows.Children.Add(row);
+        }
+        body.Children.Add(new ScrollViewer { Content = rows, MaxHeight = 360 }); openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(issuesButton);
     }
     private async void EditGroup(bool create)
     {

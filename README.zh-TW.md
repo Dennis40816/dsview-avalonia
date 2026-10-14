@@ -18,6 +18,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 已提供一次一個 Group、全部通道、自訂波形線色、Hex 封包內容、高／低脈寬、完整局部週期／頻率，以及跨通道 A/B edge／位置量測。
 捲動通道時時間尺保持可見。局部頻率不代表整段資料具有穩定的時鐘頻率。
 
+Activity 可比較全部已擷取通道在整段資料與目前視野的活動。
+Capture issues 依回報的解析層列出異常；Locate issue 定位其證據並保留量測標記。
+總覽顯示目前 Group 的原始訊號變化，包含未解析的控制訊號。
+
 ## 執行離線工作區
 
 使用 `global.json` 指定的 .NET SDK（10.0.303，允許最新 patch）：
@@ -38,6 +42,9 @@ dotnet run --project tests/DSView.Checks --no-build
 Measure A/B 依序選兩個參考點；Position 可量指定的取樣位置。
 Esc 取消選點或尚未提交的數值修改。Ctrl＋滾輪縮放，拖曳波形空白處平移。
 選封包可看內容，Locate source 才會移動時間視野；Fit time 顯示完整時間範圍。
+
+Activity 的 Show 顯示指定通道，不改時間範圍。
+若自訂 Group 已不包含解析器所需通道，明確定位來源／異常時會建立來源 Group。
 
 實體探針色條固定。點訊號名稱旁獨立的短線可改波形顏色。
 Group／線色偏好會保存；量測與擷取工作階段尚未保存。

@@ -24,7 +24,11 @@ public sealed class TimelineControl : Control
     private int? hoverChannel;
     private long hoverSample;
     private IReadOnlyList<Signal>? colorSignals;
-    private readonly Dictionary<int, (Button Button, Border Swatch)> colorButtons = [];
+    private readonly Dictionary<int, (Button Button, Border Swatch, TextBlock Activity)> colorButtons = [];
+    private Capture? overviewCapture;
+    private IReadOnlyList<Signal>? overviewSignals;
+    private bool[] activityBins = [];
+    private readonly List<(Rect Bounds, CaptureIssue Issue)> issueHits = [];
     public Canvas LabelControls { get; } = new() { Width = LabelWidth, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
     public event Action<int>? ColorRequested;
     private static readonly string[] Probe = ["#505050", "#8F5202", "#CC0000", "#F57900", "#EDD400", "#73D216", "#3465A4", "#75507B"];
@@ -34,7 +38,7 @@ public sealed class TimelineControl : Control
     public TimelineControl(Workbench workbench, bool isOverview = false, bool isRuler = false)
     {
         model = workbench; overview = isOverview; rulerOnly = isRuler; ClipToBounds = true; Focusable = true; VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
-        if (overview) ToolTip.SetTip(this, "All decoded events across the capture. Undecoded signal activity is not included.");
+        if (overview) ToolTip.SetTip(this, "Observed raw transitions in this Group across the full capture. Flags mark this Group's diagnostic evidence. Click the map to move the time view; use Capture issues to locate a diagnostic.");
         model.Changed += Refresh;
         Refresh();
         PointerPressed += Pressed; PointerMoved += Moved; PointerReleased += Released;
@@ -74,21 +78,29 @@ public sealed class TimelineControl : Control
                 AutomationProperties.SetName(button, $"D{channel} {signal.Name} waveform color");
                 ToolTip.SetTip(button, $"Waveform color · D{channel} {signal.Name}");
                 button.Click += (_, _) => ColorRequested?.Invoke(channel);
-                Canvas.SetLeft(button, 134); LabelControls.Children.Add(button); colorButtons[channel] = (button, swatch);
+                var activity = new TextBlock { FontSize = 11, Foreground = Muted, Width = 104, TextTrimming = TextTrimming.CharacterEllipsis };
+                Canvas.SetLeft(activity, 26); LabelControls.Children.Add(activity);
+                Canvas.SetLeft(button, 134); LabelControls.Children.Add(button); colorButtons[channel] = (button, swatch, activity);
             }
         }
         for (int index = 0; index < model.Signals.Count; index++)
         {
             var item = colorButtons[model.Signals[index].Id]; item.Swatch.Background = SignalColor(model.Signals[index].Id);
             Canvas.SetTop(item.Button, SignalsTop + index * RowHeight + 12);
+            var activity = model.Capture!.Activity(model.Signals[index].Id, (long)Math.Ceiling(model.Start), (long)Math.Ceiling(model.End));
+            item.Activity.Text = ActivityText.Short(activity);
+            ToolTip.SetTip(item.Activity, "Current time view · " + ActivityText.Full(activity));
+            AutomationProperties.SetName(item.Activity, $"D{model.Signals[index].Id} current view · {ActivityText.Full(activity)}");
+            Canvas.SetTop(item.Activity, SignalsTop + index * RowHeight + 29);
         }
     }
+    public void RevealSignal(int channel) { if (colorButtons.TryGetValue(channel, out var item)) item.Button.BringIntoView(); }
     public override void Render(DrawingContext context)
     {
         context.FillRectangle(Surface, Bounds.WithX(0).WithY(0));
         if (model.Capture == null) { Label(context, "Loading saved demo…", 18, 16, Muted); return; }
         if (overview) { DrawOverview(context); return; }
-        hits.Clear();
+        hits.Clear(); issueHits.Clear();
         var spanUs = model.Us(model.End - model.Start);
         var rough = spanUs / Math.Max(2, PlotWidth / 110);
         var power = Math.Pow(10, Math.Floor(Math.Log10(rough)));
@@ -110,7 +122,7 @@ public sealed class TimelineControl : Control
             foreach (var packet in model.Capture.Packets.Where(p => p.Decoder == decoder.Id && p.Span.End >= model.Start && p.Span.Start <= model.End))
             {
                 bool detailed = decoder.Id == "i2c" && 1000d / (model.End - model.Start) * PlotWidth >= 43;
-                var items = detailed ? model.Capture.ProtocolItems(packet) : [new ProtocolItem(packet, packet.Decoder == "i2c" ? packet.Address + " W · " + packet.Hex : packet.Hex, packet.Span, "data")];
+                var items = detailed ? model.Capture.ProtocolItems(packet) : [new ProtocolItem(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
                 foreach (var item in items)
                 {
                     if (item.Span.End < model.Start || item.Span.Start > model.End) continue;
@@ -137,18 +149,28 @@ public sealed class TimelineControl : Control
                         context.DrawGeometry(fill, null, geometry);
                     }
                     string label = item.Label;
-                    if (item.Kind == "ack" && width < 32) label = "A";
+                    if (item.Kind == "ack" && width < 32) label = item.Label == "ACK" ? "A" : item.Label == "NACK" ? "N" : "?";
                     var ft = Format(label, item.Kind == "ack" ? Muted : Ink("#C9F1EA"), item.Kind == "ack" ? 12 : 13, true);
                     if (ft.Width > width - 6 && detailed && item.Kind == "data" && label.StartsWith("0x", StringComparison.Ordinal))
                         ft = Format(label[2..], Ink("#C9F1EA"), 13, true);
                     if (ft.Width > width - 6 && !detailed && item.Kind == "data")
-                        ft = Format(packet.Decoder == "i2c" ? packet.Address + " W" : $"{packet.Bytes.Length} B", Ink("#C9F1EA"), 13, true);
+                        ft = Format(packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction : $"{packet.Bytes.Length} B", Ink("#C9F1EA"), 13, true);
                     if (ft.Width <= width - 6) context.DrawText(ft, new(left + (width - ft.Width) / 2, y + 5 + (26 - ft.Height) / 2));
                     hits.Add((rect, packet));
                 }
+                foreach (var issue in model.Issues.Where(i => ReferenceEquals(i.Packet, packet)))
+                foreach (var source in issue.Diagnostic.Spans.DefaultIfEmpty(packet.Span))
+                {
+                    if (source.End < model.Start || source.Start > model.End) continue;
+                    double left = Math.Max(LabelWidth, X(source.Start)), right = Math.Min(LabelWidth + PlotWidth, X(source.End));
+                    var mark = new Rect(left, y + 33, Math.Max(2, right - left), 3);
+                    context.FillRectangle(Ink("#FF9AAA"), mark);
+                    Label(context, "!", Math.Min(left, LabelWidth + PlotWidth - 9), y + 30, Ink("#FF9AAA"), 11);
+                    issueHits.Add((new(left - 3, y + 31, Math.Max(10, right - left + 6), 10), issue));
+                }
             }
         }
-        Label(context, "Signals", 16, SignalsTop - 22, Muted, 12);
+        Label(context, "Signals · current view", 16, SignalsTop - 22, Muted, 12);
         context.DrawLine(new Pen(GridInk, 1), new(0, SignalsTop - 7), new(Bounds.Width, SignalsTop - 7));
         if (model.Selected is { } selected && model.SelectionInGroup)
         {
@@ -159,8 +181,8 @@ public sealed class TimelineControl : Control
         {
             var y = SignalsTop + index * RowHeight;
             context.FillRectangle(Ink(Probe[signal.Id % 8]), new(15, y + 16, 5, 20));
-            Label(context, $"D{signal.Id}", 26, y + 18, Muted, 12);
-            using (context.PushClip(new Rect(57, y, 73, RowHeight))) Label(context, signal.Name, 57, y + 17, Text, 13);
+            Label(context, $"D{signal.Id}", 26, y + 8, Muted, 12);
+            using (context.PushClip(new Rect(57, y, 73, RowHeight))) Label(context, signal.Name, 57, y + 7, Text, 13);
             IBrush color = SignalColor(signal.Id);
             using (context.PushClip(new Rect(LabelWidth, y, PlotWidth, RowHeight)))
             {
@@ -179,6 +201,25 @@ public sealed class TimelineControl : Control
                     g.LineTo(new(LabelWidth + PlotWidth, level)); g.EndFigure(false);
                 }
                 context.DrawGeometry(null, new Pen(color, 1.35), geometry);
+                foreach (var unknown in model.Capture.UnknownLevelSpans(signal))
+                {
+                    var l = Math.Max(LabelWidth, X(unknown.Start)); var r = Math.Min(LabelWidth + PlotWidth, X(unknown.End));
+                    if (r <= l) continue;
+                    context.FillRectangle(Surface, new(l, y + 12, r - l, 29));
+                    context.DrawLine(new Pen(Muted, 1, DashStyle.Dash), new(l, y + 26), new(r, y + 26));
+                    if (r - l > 100) Label(context, "Unknown level", l + 5, y + 12, Muted, 11);
+                }
+            }
+        }
+        foreach (var gap in model.Capture.Gaps)
+        {
+            var left = Math.Max(LabelWidth, X(gap.Start)); var right = Math.Min(LabelWidth + PlotWidth, X(gap.End));
+            if (right <= left) continue;
+            using (context.PushClip(new Rect(left, SignalsTop, right - left, model.Signals.Count * RowHeight)))
+            {
+                context.FillRectangle(Ink("#19232E"), new(left, SignalsTop, right - left, model.Signals.Count * RowHeight));
+                for (double x = left - Height; x < right; x += 12) context.DrawLine(new Pen(GridInk, 1), new(x, Height), new(x + Height, SignalsTop));
+                if (right - left > 95) Label(context, "Missing samples", left + 4, SignalsTop + 5, Muted, 11);
             }
         }
         DrawMarker(context, model.A, "A", false); DrawMarker(context, model.B, "B", true);
@@ -217,14 +258,26 @@ public sealed class TimelineControl : Control
     }
     private void DrawOverview(DrawingContext context)
     {
-        Label(context, "Decoded overview", 16, 13, Muted, 12);
+        Label(context, "Group activity", 16, 2, Muted, 12);
+        Label(context, "Full capture · " + TimingText.Duration(model.Capture!.SampleCount / (double)model.Capture.SampleRate), 16, 20, Muted, 11);
         context.FillRectangle(Ink("#18242E"), new(LabelWidth, 7, PlotWidth, 33));
-        foreach (var packet in model.Capture!.Packets)
+        int bins = Math.Max(1, (int)Math.Ceiling(PlotWidth));
+        if (!ReferenceEquals(overviewCapture, model.Capture) || !ReferenceEquals(overviewSignals, model.Signals) || activityBins.Length != bins)
         {
-            double x = LabelWidth + packet.Span.Start / (double)model.Capture.SampleCount * PlotWidth;
-            var width = Math.Max(2, (packet.Span.End - packet.Span.Start) / (double)model.Capture.SampleCount * PlotWidth);
-            var lane = Array.FindIndex(DSView.Domain.Capture.Decoders, d => d.Id == packet.Decoder);
-            context.FillRectangle(packet.Error == null ? Ink("#506270") : Ink("#DE8794"), new(x, 11 + lane * 6, width, 3));
+            overviewCapture = model.Capture; overviewSignals = model.Signals; activityBins = model.Capture.ActivityBins(overviewSignals, bins);
+        }
+        for (int i = 0; i < activityBins.Length; i++) if (activityBins[i]) context.FillRectangle(Ink("#6B8796"), new(LabelWidth + i * PlotWidth / bins, 12, PlotWidth / bins, 13));
+        foreach (var gap in model.Capture.Gaps)
+        {
+            double left = LabelWidth + Math.Clamp(gap.Start / (double)model.Capture.SampleCount, 0, 1) * PlotWidth;
+            double right = LabelWidth + Math.Clamp(gap.End / (double)model.Capture.SampleCount, 0, 1) * PlotWidth;
+            if (right > left) context.DrawRectangle(Ink("#402F32"), new Pen(Muted, 1, DashStyle.Dash), new(left, 8, right - left, 30));
+        }
+        foreach (var issue in model.Issues.Where(i => model.IsAllSignals || model.Group.Decoders.Contains(i.Packet.Decoder)))
+        {
+            double sample = issue.Diagnostic.Spans.Count > 0 ? issue.Diagnostic.Spans.Min(s => s.Start) : issue.Packet.Span.Start;
+            double x = LabelWidth + sample / model.Capture.SampleCount * PlotWidth;
+            Label(context, "!", Math.Clamp(x - 3, LabelWidth, LabelWidth + PlotWidth - 10), 24, Ink("#FF9AAA"), 12);
         }
         var a = LabelWidth + model.Start / model.Capture.SampleCount * PlotWidth;
         var b = LabelWidth + model.End / model.Capture.SampleCount * PlotWidth;
@@ -236,7 +289,7 @@ public sealed class TimelineControl : Control
     {
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || model.Capture == null) return;
         Focus(); var p = e.GetPosition(this);
-        if (overview) { model.Remember(); var center = Math.Clamp((p.X - LabelWidth) / PlotWidth, 0, 1) * model.Capture.SampleCount; var half = (model.End - model.Start) / 2; model.SetRange(center - half, center + half); e.Handled = true; return; }
+        if (overview) { if (p.X < LabelWidth || p.X > LabelWidth + PlotWidth) return; model.Remember(); var center = Math.Clamp((p.X - LabelWidth) / PlotWidth, 0, 1) * model.Capture.SampleCount; var half = (model.End - model.Start) / 2; model.SetRange(center - half, center + half); e.Handled = true; return; }
         if (p.X < LabelWidth) return;
         if (p.X > LabelWidth + PlotWidth) return;
         press = p; pressStart = model.Start; pressEnd = model.End; down = true; dragged = false;
@@ -251,7 +304,8 @@ public sealed class TimelineControl : Control
         if (!overview && !rulerOnly)
         {
             var labelChannel = p.X < LabelWidth ? ChannelAt(p.Y) : null;
-            ToolTip.SetTip(this, labelChannel is int id && p.X < 134 ? $"D{id} · {model.Signals.First(s => s.Id == id).Name} · Physical probe identity" : null);
+            var issue = issueHits.FirstOrDefault(h => h.Bounds.Contains(p)).Issue;
+            ToolTip.SetTip(this, issue != null ? $"{issue.Diagnostic.Layer} · {issue.Diagnostic.Message}. Click to inspect; use Locate issue for its evidence." : labelChannel is int id && p.X < 134 ? $"D{id} · {model.Signals.First(s => s.Id == id).Name} · Physical probe identity" : null);
         }
         if (!down) { InvalidateVisual(); return; }
         if (!dragged && Math.Abs(p.X - press.X) > 4) { dragged = true; if (dragEndpoint == null) model.Remember(); }
@@ -269,8 +323,10 @@ public sealed class TimelineControl : Control
         down = false; var p = e.GetPosition(this); e.Pointer.Capture(null);
         if (!dragged)
         {
+            var issue = issueHits.FirstOrDefault(h => h.Bounds.Contains(p)).Issue;
             var hit = hits.FirstOrDefault(h => h.Bounds.Contains(p));
-            if (hit.Packet != null) model.Select(hit.Packet);
+            if (issue != null) model.SelectIssue(issue);
+            else if (hit.Packet != null) model.Select(hit.Packet);
             else if (ChannelAt(p.Y) is int channel) model.Pick(channel, Sample(p.X), (model.End - model.Start) / PlotWidth * 8);
         }
         dragEndpoint = null; e.Handled = true;

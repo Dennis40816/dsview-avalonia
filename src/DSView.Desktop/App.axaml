@@ -8,5 +8,6 @@
     <Style Selector="TextBox"><Setter Property="MinHeight" Value="30" /><Setter Property="Padding" Value="8,4" /></Style>
     <Style Selector="ComboBox"><Setter Property="MinHeight" Value="32" /><Setter Property="Padding" Value="8,4" /></Style>
     <Style Selector="ToolTip"><Setter Property="MaxWidth" Value="380" /></Style>
+    <Style Selector="FlyoutPresenter.analysis"><Setter Property="MaxWidth" Value="640" /><Setter Property="Background" Value="#18242E" /><Setter Property="Padding" Value="12" /><Setter Property="BorderBrush" Value="#34444F" /></Style>
   </Application.Styles>
 </Application>

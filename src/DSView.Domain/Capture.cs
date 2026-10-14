@@ -34,9 +34,16 @@ public sealed record LocalMeasurement(int Channel, bool High, SourceSpan? Pulse,
     public long? PeriodSamples => Cycle is { } p ? p.End - p.Start : null;
 }
 public sealed record PacketField(string Name, byte[] Raw, IReadOnlyList<SourceSpan> Spans);
+public sealed record PacketDiagnostic(string Id, string Layer, string Code, string Message, IReadOnlyList<SourceSpan> Spans, string? Field = null);
+public sealed record CaptureIssue(Packet Packet, PacketDiagnostic Diagnostic);
+public sealed record I2cTransfer(bool Read, IReadOnlyList<bool?> Acknowledged);
+public sealed record SignalActivity(int Edges, bool Complete, bool? ConstantLevel);
 public sealed record Packet(string Id, string Decoder, SourceSpan Span, byte[] Bytes, string Address,
     string Title, string? Error, int? Value, IReadOnlyList<PacketField> Fields)
 {
+    public IReadOnlyList<PacketDiagnostic> Diagnostics { get; init; } = [];
+    public I2cTransfer? I2c { get; init; }
+    public string Direction => I2c == null ? "?" : I2c.Read ? "R" : "W";
     public string Hex => string.Join(" ", Bytes.Select(b => b.ToString("X2")));
     public override string ToString() => $"{Id,-8} {Decoder.ToUpperInvariant(),-5}   {Span.Start / 50d,8:0.##} µs   {Hex,-22}   {Error ?? Title}";
 }
@@ -51,6 +58,48 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
 {
     // Half-open intervals where samples are absent. Silence alone is not a gap.
     public IReadOnlyList<SourceSpan> Gaps { get; init; } = [];
+    public bool HasSample(long sample) => sample >= 0 && sample < SampleCount && !Gaps.Any(g => g.Start <= sample && g.End > sample);
+    public Edge? NearestObservedEdge(Signal signal, long sample)
+    {
+        int right = signal.LowerBound(sample), left = right - 1;
+        while (left >= 0 && !HasSample(signal.Edges[left].Sample)) left--;
+        while (right < signal.Edges.Count && !HasSample(signal.Edges[right].Sample)) right++;
+        if (left < 0) return right < signal.Edges.Count ? signal.Edges[right] : null;
+        if (right == signal.Edges.Count) return signal.Edges[left];
+        return sample - signal.Edges[left].Sample <= signal.Edges[right].Sample - sample ? signal.Edges[left] : signal.Edges[right];
+    }
+    public SignalActivity Activity(int channel, long start, long end)
+    {
+        var signal = Signals.FirstOrDefault(s => s.Id == channel);
+        if (signal == null || start < 0 || end > SampleCount || start >= end) return new(0, false, null);
+        int first = signal.LowerBound(start), last = signal.LowerBound(end);
+        int count = Gaps.Count == 0 ? last - first : signal.Edges.Skip(first).Take(last - first).Count(e => HasSample(e.Sample));
+        bool complete = !Gaps.Any(g => g.Start < end && g.End > start);
+        long evidence = first > 0 ? signal.Edges[first - 1].Sample : 0;
+        bool knownLevel = complete && !Gaps.Any(g => g.Start <= start && g.End > evidence);
+        return new(count, complete, count == 0 && knownLevel ? first > 0 ? signal.Edges[first - 1].High : signal.Initial : null);
+    }
+    // A gap invalidates the level until a subsequent observed transition establishes it again.
+    public IEnumerable<SourceSpan> UnknownLevelSpans(Signal signal)
+    {
+        foreach (var gap in Gaps)
+        {
+            int next = signal.LowerBound(gap.End);
+            while (next < signal.Edges.Count && !HasSample(signal.Edges[next].Sample)) next++;
+            yield return new(Math.Max(0, gap.Start), next < signal.Edges.Count ? signal.Edges[next].Sample : SampleCount);
+        }
+    }
+    public bool[] ActivityBins(IEnumerable<Signal> signals, int count)
+    {
+        if (count < 1 || SampleCount <= 0) throw new ArgumentOutOfRangeException(nameof(count));
+        var bins = new bool[count];
+        foreach (var edge in signals.SelectMany(s => s.Edges).Where(e => HasSample(e.Sample)))
+            bins[Math.Clamp((int)(edge.Sample / (double)SampleCount * count), 0, count - 1)] = true;
+        return bins;
+    }
+    public IReadOnlyList<CaptureIssue> Issues => Packets.SelectMany(p =>
+        (p.Diagnostics.Count > 0 ? p.Diagnostics : p.Error is { } error ? [new PacketDiagnostic(p.Id + "/unclassified", "Unclassified", "unknown", error, [p.Span])] : Array.Empty<PacketDiagnostic>())
+        .Select(d => new CaptureIssue(p, d))).OrderBy(i => i.Diagnostic.Spans.Count > 0 ? i.Diagnostic.Spans.Min(s => s.Start) : i.Packet.Span.Start).ThenBy(i => i.Diagnostic.Id, StringComparer.Ordinal).ToArray();
     public LocalMeasurement MeasureAt(int channel, long sample)
     {
         var signal = Signals.FirstOrDefault(s => s.Id == channel);
@@ -82,13 +131,14 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
         // Synthetic fixture metadata, not a live protocol decoder. Coordinates are sample indices.
         var result = new List<ProtocolItem> { new(packet, "START", new(packet.Span.Start, packet.Span.Start), "point") };
         long first = packet.Span.Start + 125;
-        result.Add(new(packet, packet.Address + " W", new(first, first + 1000), "data"));
-        result.Add(new(packet, "ACK", new(first + 1000, first + 1125), "ack"));
+        string Ack(int index) => packet.I2c?.Acknowledged.ElementAtOrDefault(index) switch { true => "ACK", false => "NACK", _ => "?" };
+        result.Add(new(packet, packet.Address + (packet.I2c == null ? " ?" : packet.I2c.Read ? " R" : " W"), new(first, first + 1000), "data"));
+        result.Add(new(packet, Ack(0), new(first + 1000, first + 1125), "ack"));
         for (int i = 0; i < packet.Bytes.Length; i++)
         {
             long start = first + (i + 1) * 1125;
             result.Add(new(packet, $"0x{packet.Bytes[i]:X2}", new(start, start + 1000), "data"));
-            result.Add(new(packet, "ACK", new(start + 1000, start + 1125), "ack"));
+            result.Add(new(packet, Ack(i + 1), new(start + 1000, start + 1125), "ack"));
         }
         result.Add(new(packet, "STOP", new(packet.Span.End, packet.Span.End), "point"));
         return result;
