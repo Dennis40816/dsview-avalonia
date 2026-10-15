@@ -11,6 +11,7 @@ await AppearanceStorageChecks.RunAsync(Check);
 if (args.Contains("--display-preferences-only")) { Console.WriteLine($"{passed} appearance checks passed."); return; }
 CursorPlacementChecks.Run(Check);
 ChannelAppearanceChecks.Run(Check);
+I2cChannelMapChecks.Run(Check);
 if (args.Contains("--cursor-placement-only")) { Console.WriteLine($"{passed} appearance and cursor placement checks passed."); return; }
 var capture = await DemoCaptureSource.LoadAsync();
 var clock = capture.MeasureAt(0, 25025);
@@ -230,6 +231,7 @@ await TimingResultChecks.RunAsync(Check, capture);
 int nativeOption = Array.IndexOf(args, "--native-i2c");
 if (nativeOption >= 0 && nativeOption + 1 >= args.Length) throw new ArgumentException("--native-i2c requires a configuration path.");
 await RawDecodeChecks.Run(Check, nativeOption < 0 ? null : args[nativeOption + 1]);
+await I2cChannelMapChecks.RunNativeAsync(Check, nativeOption < 0 ? null : args[nativeOption + 1]);
 int importOption = Array.IndexOf(args, "--native-dsl");
 if (importOption >= 0 && importOption + 1 >= args.Length) throw new ArgumentException("--native-dsl requires a configuration path.");
 await DslImportChecks.RunAsync(Check, importOption < 0 ? null : args[importOption + 1]);

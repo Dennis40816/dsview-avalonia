@@ -56,7 +56,8 @@ The desktop source-generation check prevents stale loads replacing a newer
 capture. Failed or cancelled loads retain the previous capture.
 
 Input must be a finite, continuous capture of 10 through 64,000,000 samples.
-D0 is SCL and D1 is SDA. Both must have ordered, alternating transitions; the
+The existing example's `DecodeAsync` path uses D0/SCL and D1/SDA.
+Both must have ordered, alternating transitions; the
 initial level precedes the first transition. Missing-data intervals are rejected.
 Other captured channels remain in the capture but do not enter this decoder.
 
@@ -73,6 +74,33 @@ has `ceil(sampleCount / 8)` bytes with least-significant-bit-first samples.
 It is generated from the same signal arrays used for display and measurement.
 The fixture has no packet records to copy into the result.
 
+### Explicit physical channel roles
+
+`DecodeMappedAsync(source, new I2cChannelMap(sclId, sdaId), options, cancellation)`
+accepts two distinct, present physical IDs. Missing or duplicate selected IDs
+are rejected before starting the worker. Input packing selects by ID, not
+signal-list order, and keeps SCL/SDA in the worker's two-plane order. It never
+renumbers the source or copies unrelated channels into those planes.
+
+The returned `I2cDecodeResult` holds the exact source reference, the role map
+and decoded packets separately. It does not replace the current capture.
+The UI must check source identity and job generation before publishing results.
+Mapped results are deliberately not returned as a ready-to-display `Capture`:
+the current UI track metadata still assumes the example's fixed channel roles.
+Capture-scoped tracks, source navigation, group membership and versioned saved
+mapping must be integrated together before enabling this in the App.
+
+The existing fixed-role `DecodeAsync` path replaces only the `i2c` records.
+It retains other protocol objects, raw signals, source description and capture
+metadata. New packet IDs avoid collisions with retained records. No adapter
+labels an imported or hardware source as generated data.
+
+Checks include a hand-calculated 13-sample packed input, reversed and sparse
+physical roles, gaps, cancellation, record/provenance preservation and output
+admission. With `--native-i2c`, the actual worker also decodes D1/SCL + D0/SDA
+and D19/SCL + D3/SDA with unrelated D0/D1 present. Those are controlled raw
+fixtures, not evidence of real hardware acquisition or imported-file UI use.
+
 The parent reads stdout and stderr concurrently, with limits of 4,000,000 and
 65,536 characters respectively, and a 45-second execution deadline. Cancellation
 terminates the process tree and observes both readers. Input is removed only
@@ -88,6 +116,8 @@ after native session teardown. The envelope contains `schema: 1`,
 `decoder: "1:i2c"`, `addressFormat: "shifted"`, the requested `sampleRate` and
 `sampleCount`, `completion: "eof"`, `openTransaction`, and an `events` array.
 At most 200,000 events are accepted. A nonzero process exit is a failed load.
+Unknown, missing and duplicate object fields are rejected, including duplicate
+names with different capitalization. This applies to the envelope and events.
 
 Each event has sequential `sequence`, `kind`, `start`, `end`, `spanEvidence`,
 nullable `value`, and `bits` fields. Sample positions are integers.
@@ -116,7 +146,7 @@ read NACK does not. No DemoFrame or private application-layer fields are inferre
 ## Scope still open
 
 This option does not provide hardware acquisition, capture-file import,
-gap-aware decoding, configurable channel roles, other decoders, application
+gap-aware decoding, an App channel-role editor, other decoders, application
 stacking. Capture import and saved analysis are separate workbench paths; neither
 automatically runs this decoder. The candidate native runtime
 patch has I²C-specific evidence; generic `wait`/`skip` and streaming behavior

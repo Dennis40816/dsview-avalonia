@@ -29,18 +29,24 @@ public static class NativeI2cSource
         return await DecodeAsync(raw, options, cancellation).ConfigureAwait(false);
     }
     public static async Task<Capture> LoadRawExampleAsync(CancellationToken cancellation = default) =>
-        await DemoCaptureSource.LoadFixtureAsync("i2c-raw", cancellation).ConfigureAwait(false) with { SourceDescription = "Generated raw SCL/SDA. Protocol decoding has not run." };
+        await DemoCaptureSource.LoadFixtureAsync("i2c-raw", cancellation).ConfigureAwait(false) with { SourceDescription = "Generated raw SCL/SDA. No hardware capture." };
 
-    public static Task<Capture> DecodeAsync(Capture raw, NativeI2cOptions options, CancellationToken cancellation = default) =>
-        Task.Run(() => DecodeCoreAsync(raw, options, cancellation), cancellation);
-    private static async Task<Capture> DecodeCoreAsync(Capture raw, NativeI2cOptions options, CancellationToken cancellation)
+    public static async Task<Capture> DecodeAsync(Capture raw, NativeI2cOptions options, CancellationToken cancellation = default)
+    {
+        var result = await DecodeMappedAsync(raw, new(0, 1), options, cancellation).ConfigureAwait(false);
+        return I2cEventAdapter.ReplacePackets(raw, result.Packets);
+    }
+    public static Task<I2cDecodeResult> DecodeMappedAsync(Capture raw, I2cChannelMap channels, NativeI2cOptions options, CancellationToken cancellation = default) =>
+        Task.Run(() => DecodeCoreAsync(raw, channels, options, cancellation), cancellation);
+    private static async Task<I2cDecodeResult> DecodeCoreAsync(Capture raw, I2cChannelMap channels, NativeI2cOptions options, CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
         // The worker accepts finite continuous sources only. No gap concatenation.
         if (raw.SampleRate <= 0 || raw.SampleCount < 10 || raw.SampleCount > 64_000_000 || raw.Gaps.Count != 0)
             throw new InvalidDataException("I²C decoding currently requires a finite, continuous capture.");
+        channels.Resolve(raw);
         ValidateOptions(options);
-        var packed = Pack(raw, cancellation);
+        var packed = I2cSampleInput.Pack(raw, channels, cancellation);
         var directory = Path.Combine(Path.GetTempPath(), "DSView2", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var input = Path.Combine(directory, "samples.raw");
@@ -67,9 +73,9 @@ public static class NativeI2cSource
                 await Task.WhenAll(output, error, process.WaitForExitAsync(timeout.Token)).ConfigureAwait(false);
                 cancellation.ThrowIfCancellationRequested();
                 if (process.ExitCode != 0) throw new InvalidDataException("I²C decoder failed. " + (await error.ConfigureAwait(false)).Trim());
-                var result = I2cEventAdapter.Apply(raw, await output.ConfigureAwait(false));
+                var packets = I2cEventAdapter.ReadPackets(raw, await output.ConfigureAwait(false));
                 cancellation.ThrowIfCancellationRequested();
-                return result;
+                return new(raw, channels, packets);
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             { failure = new TimeoutException("I²C decoding did not finish within the configured time limit."); throw failure; }
@@ -135,33 +141,5 @@ public static class NativeI2cSource
         using var file = File.OpenRead(path);
         if (expected?.Length != 64 || !Convert.ToHexString(SHA256.HashData(file)).Equals(expected, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("Decoder runtime identity changed. Review its configuration before using it.");
-    }
-    private static byte[] Pack(Capture raw, CancellationToken cancellation)
-    {
-        int size = checked((int)((raw.SampleCount + 7) / 8));
-        var bytes = new byte[checked(size * 2)];
-        for (int channel = 0; channel < 2; channel++)
-        {
-            var matches = raw.Signals.Where(s => s.Id == channel).ToArray();
-            if (matches.Length != 1) throw new InvalidDataException("I²C requires one D0/SCL and one D1/SDA signal.");
-            var signal = matches[0]; long previous = 0; bool high = signal.Initial;
-            foreach (var edge in signal.Edges)
-            {
-                cancellation.ThrowIfCancellationRequested();
-                if (edge.Sample <= previous || edge.Sample >= raw.SampleCount || edge.High == high)
-                    throw new InvalidDataException("Raw transitions must be ordered, alternating and inside the capture.");
-                if (high) Fill(previous, edge.Sample, channel * size);
-                previous = edge.Sample; high = edge.High;
-            }
-            if (high) Fill(previous, raw.SampleCount, channel * size);
-        }
-        return bytes;
-        void Fill(long first, long end, int offset)
-        {
-            while (first < end && first % 8 != 0) { bytes[offset + (int)(first / 8)] |= (byte)(1 << (int)(first % 8)); first++; }
-            long whole = (end - first) / 8;
-            Array.Fill(bytes, (byte)255, offset + (int)(first / 8), (int)whole); first += whole * 8;
-            while (first < end) { bytes[offset + (int)(first / 8)] |= (byte)(1 << (int)(first % 8)); first++; }
-        }
     }
 }

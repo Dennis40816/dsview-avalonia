@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Dennis40816
 // SPDX-License-Identifier: GPL-3.0-or-later
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using DSView.Domain;
 
 namespace DSView.Infrastructure;
@@ -8,15 +9,23 @@ namespace DSView.Infrastructure;
 // Adapts structured decoder output; it does not parse raw SCL/SDA samples.
 public static class I2cEventAdapter
 {
-    public static Capture Apply(Capture raw, string json)
+    public static Capture Apply(Capture raw, string json) => ReplacePackets(raw, ReadPackets(raw, json));
+
+    internal static Capture ReplacePackets(Capture raw, IReadOnlyList<Packet> decoded) => raw with
     {
-        var output = JsonSerializer.Deserialize<Envelope>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-            ?? throw new InvalidDataException("Decoder returned no result.");
+        Packets = raw.Packets.Where(p => p.Decoder != "i2c").Concat(decoded).OrderBy(p => p.Span.Start).ToArray()
+    };
+
+    internal static IReadOnlyList<Packet> ReadPackets(Capture raw, string json)
+    {
+        var output = ReadEnvelope(json);
         if (raw.SampleCount is < 10 or > 64_000_000 || raw.SampleRate <= 0 || output.Schema != 1 || output.Decoder != "1:i2c" || output.AddressFormat != "shifted" ||
             output.SampleRate != raw.SampleRate || output.SampleCount != raw.SampleCount || output.Completion != "eof" ||
             output.Events == null || output.Events.Length > 200_000 || raw.Gaps.Count > 0)
             throw new InvalidDataException("Decoder result does not match the requested source or contract.");
         var packets = new List<Packet>();
+        var occupiedIds = raw.Packets.Where(p => p.Decoder != "i2c").Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
+        int nextId = 1;
         Segment? segment = null;
         Event? pendingBits = null;
         long previous = -1;
@@ -87,12 +96,13 @@ public static class I2cEventAdapter
         if (pendingBits != null) throw new InvalidDataException("Unconsumed native bit evidence at EOF.");
         if (output.OpenTransaction != (segment != null)) throw new InvalidDataException("Decoder completion contradicts observed events.");
         if (segment != null) Finish(I2cCompletion.CaptureEnded, raw.SampleCount);
-        return raw with { Packets = packets.ToArray(), SourceDescription = "Generated SCL/SDA, decoded from these samples. No hardware capture. Protocol intervals are decoder annotations; timing measurements use raw edges." };
+        return packets.ToArray();
 
         void Finish(I2cCompletion completion, long end)
         {
             var s = segment!;
-            string id = $"i2c-{packets.Count + 1}";
+            string id;
+            do { id = $"i2c-{nextId++}"; } while (!occupiedIds.Add(id));
             var diagnostics = new List<PacketDiagnostic>();
             if (s.Acknowledged.FirstOrDefault() == false)
             {
@@ -118,6 +128,36 @@ public static class I2cEventAdapter
             });
             segment = null;
         }
+    }
+    private static Envelope ReadEnvelope(string json)
+    {
+        if (json.Length > 4_000_000) throw new InvalidDataException("Decoder output exceeded its limit.");
+        try
+        {
+            using var document = JsonDocument.Parse(json, new() { MaxDepth = 16 });
+            CheckUnique(document.RootElement);
+            return document.Deserialize<Envelope>(new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true, MaxDepth = 16,
+                UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+                RespectRequiredConstructorParameters = true
+            }) ?? throw new InvalidDataException("Decoder returned no result.");
+        }
+        catch (JsonException ex) { throw new InvalidDataException("Invalid decoder output document.", ex); }
+    }
+    private static void CheckUnique(JsonElement item)
+    {
+        if (item.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in item.EnumerateObject())
+            {
+                if (!names.Add(property.Name)) throw new InvalidDataException("Duplicate decoder output field.");
+                CheckUnique(property.Value);
+            }
+        }
+        else if (item.ValueKind == JsonValueKind.Array)
+            foreach (var child in item.EnumerateArray()) CheckUnique(child);
     }
     private sealed class Segment(long start, string label)
     {
