@@ -33,7 +33,10 @@ public sealed partial class MainWindow
                 if (preceding.Span.End <= selected.Span.Start && preceding.DataIndex is int b) identity += $" · Data byte {b + 1}";
                 else if (preceding.Span.End <= selected.Span.Start && preceding.IsAddress) identity += " · Address";
             }
-            var label = Text(identity); label.FontWeight = FontWeight.SemiBold; label.TextWrapping = TextWrapping.Wrap; detail.Children.Add(label);
+            var markerStyle = ProtocolMarkerStyle.For(selected);
+            var label = Text(identity); label.FontWeight = FontWeight.SemiBold; label.TextWrapping = TextWrapping.Wrap;
+            if (markerStyle != null) label.Foreground = markerStyle.Foreground;
+            detail.Children.Add(label);
             var span = Text(selected.Kind == "point"
                 ? TimeAxis.Microseconds(selected.Span.Start, Model.Capture.SampleRate) + " µs · event"
                 : TimeAxis.FormatRange(selected.Span.Start, selected.Span.End, Model.Capture.SampleRate) + " · decoded interval", true);

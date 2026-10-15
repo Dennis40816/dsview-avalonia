@@ -8,6 +8,17 @@ interval. The waveform highlights that interval and fields whose source spans
 overlap it. Address, ACK/NACK and START/STOP remain separate elements. Point
 events have a position; the application does not invent a bit duration for them.
 
+I²C START/repeated START markers are green, STOP is blue, ACK cells are muted
+green and NACK cells are amber. NACK is a bus response and can end a normal
+read; it does not by itself create a diagnostic. Rose marks diagnostic evidence.
+Unknown acknowledgement remains neutral and is labeled `?` when space permits.
+Labels accompany color: `S`/`Sr`/`P` for point events and `ACK`/`NACK` (or `A`/`N`
+in narrower cells). A thin colored stripe remains when acknowledgement text
+cannot fit. Selection adds a pale outline without changing the event's color;
+the inspector shows its full identity in the same color. Zoomed-out packet
+aggregates retain their compact data summary; individual events appear after
+zooming. Waveform and physical-probe colors are independent of these markers.
+
 Selection preserves time, Group and A/B. **Locate selected** explicitly frames
 the element's source; **Previous** returns to the earlier view. **Whole packet**
 returns to transaction selection. At coarse zoom, an aggregate selects the

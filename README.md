@@ -28,7 +28,8 @@ The time ruler stays visible while scrolling channels. A local frequency is not
 a claim of a stable capture-wide clock.
 
 Select a decoded byte to connect its Hex value, annotated interval and fields
-in the existing inspector. ACK and START/STOP stay separate. Locate selected
+in the existing inspector. ACK and START/STOP stay separate, with semantic colors
+and text labels; NACK is amber and diagnostic evidence is rose. Locate selected
 frames that evidence while preserving A/B; Previous returns to the earlier
 view. See [protocol selection](docs/PROTOCOL-SELECTION.md).
 

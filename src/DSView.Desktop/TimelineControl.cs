@@ -224,14 +224,17 @@ public sealed class TimelineControl : Control
                     var left = Math.Max(LabelWidth, X(item.Span.Start)); var right = Math.Min(LabelWidth + PlotWidth, X(item.Span.End));
                     var width = Math.Max(1, right - left); var rect = new Rect(left, y + 5, width, 26);
                     bool selectedItem = detailed && model.Selected == packet && model.SelectedProtocolIndex == itemIndex;
+                    var markerStyle = ProtocolMarkerStyle.For(item);
                     if (item.Kind == "point")
                     {
-                        context.DrawLine(new Pen(selectedItem ? Accent : Muted, selectedItem ? 2 : 1), new(left, y + 3), new(left, y + 32));
+                        var markerInk = markerStyle?.Foreground ?? Muted;
+                        if (selectedItem) context.DrawRectangle(null, new Pen(Text, 1), new Rect(left - 3, y + 2, 6, 31));
+                        context.DrawLine(new Pen(markerInk, 2), new(left, y + 3), new(left, y + 32));
                         string pointLabel = item.Label switch { "START" => "S", "RESTART" or "START REPEAT" => "Sr", "STOP" => "P", _ => item.Label };
-                        Label(context, pointLabel, Math.Clamp(left + 2, LabelWidth, LabelWidth + PlotWidth - 18), y + 10, Muted, 11);
+                        Label(context, pointLabel, Math.Clamp(left + 5, LabelWidth, LabelWidth + PlotWidth - 18), y + 10, markerInk, 11);
                         hits.Add((new(left - 5, y, 14, 36), packet, detailed ? itemIndex : null)); continue;
                     }
-                    IBrush fill = item.Kind == "ack" ? Ink("#25303A") : Ink(model.Selected == packet ? "#245A53" : "#254347");
+                    IBrush fill = markerStyle?.Background ?? (item.Kind == "ack" ? Ink("#25303A") : Ink(model.Selected == packet ? "#245A53" : "#254347"));
                     if (item.Kind == "ack" || width < 10) context.FillRectangle(fill, rect);
                     else
                     {
@@ -245,10 +248,16 @@ public sealed class TimelineControl : Control
                         }
                         context.DrawGeometry(fill, selectedItem ? new Pen(Accent, 1.5) : null, geometry);
                     }
-                    if (selectedItem && (item.Kind == "ack" || width < 10)) context.DrawRectangle(null, new Pen(Accent, 1.5), rect);
+                    if (item.Kind == "ack" && markerStyle != null) context.FillRectangle(markerStyle.Foreground, new Rect(left, y + 5, width, 2));
+                    if (selectedItem && (item.Kind == "ack" || width < 10)) context.DrawRectangle(null, new Pen(item.Kind == "ack" ? Text : Accent, 1.5), rect);
                     string label = item.Label;
-                    if (item.Kind == "ack" && width < 32) label = item.Label == "ACK" ? "A" : item.Label == "NACK" ? "N" : "?";
-                    var ft = Format(label, item.Kind == "ack" ? Muted : Ink("#C9F1EA"), item.Kind == "ack" ? 12 : 13, true);
+                    var labelInk = markerStyle?.Foreground ?? (item.Kind == "ack" ? Muted : Ink("#C9F1EA"));
+                    var ft = Format(label, labelInk, item.Kind == "ack" ? 12 : 13, true);
+                    if (item.Kind == "ack" && ft.Width > width - 6)
+                    {
+                        label = item.Label == "ACK" ? "A" : item.Label == "NACK" ? "N" : "?";
+                        ft = Format(label, labelInk, 12, true);
+                    }
                     if (ft.Width > width - 6 && detailed && item.Kind == "data" && label.StartsWith("0x", StringComparison.Ordinal))
                         ft = Format(label[2..], Ink("#C9F1EA"), 13, true);
                     if (ft.Width > width - 6 && !detailed && item.Kind == "data")
