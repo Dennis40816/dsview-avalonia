@@ -9,12 +9,12 @@ Demo is a required first-release acquisition source. It must work without a USB
 instrument or hardware driver installation. The existing offline examples load
 complete captures; they do not yet implement the acquisition lifecycle below.
 
-The [acquisition pipeline](ACQUISITION.md), Clock, I2C + Interrupt and UART 8N1 sources are
+The [acquisition pipeline](ACQUISITION.md), Clock, I2C + Interrupt, UART 8N1 and SPI Mode 0 sources are
 implemented and behavior-tested. App controls connect scenario setup,
-Start/Stop/Review, partial-result acceptance and safe publication. I2C and UART
-produce raw signals; the explicit **Decode I2C/UART** action uses the shared native
+Start/Stop/Review, partial-result acceptance and safe publication. Protocol scenarios
+produce raw signals; the explicit **Decode** action uses the shared native
 decoders. Known bytes, repeated START, final NACK, exact timing, UART 8N1 bursts,
-truncation and save/reopen are verified end to end. Native UI acceptance, SPI Demo, live waveform
+full-duplex SPI, truncation and save/reopen are verified end to end. Native UI acceptance, live waveform
 preview and a distributable decoder runtime remain open. Raw Demo generation
 itself does not require a hardware driver or the installed DSView demo assets.
 

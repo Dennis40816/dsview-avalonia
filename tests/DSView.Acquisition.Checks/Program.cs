@@ -203,4 +203,20 @@ await using (var uart = new AcquisitionSession(new DemoUartSource(1_000,640,100,
         && raw.Signals.Single().Edges.Contains(new Edge(370,true)),
         "UART measures actual data pulses and retains the nine-bit low interval of byte 00 without inventing edges");
 }
+var spiTime=new ControlledTime();
+await using (var spi=new AcquisitionSession(new DemoSpiSource(1000,128,1,31,4,9,12,spiTime),new(BatchSamples:31)))
+{
+    var job=spi.RunAsync();
+    for(int i=0;i<5;i++) (await spiTime.NextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10))).Fire();
+    var result=await job.WaitAsync(TimeSpan.FromSeconds(10));var raw=result.RawCapture!;
+    Check(result.CanPublish && raw.Signals.Select(s=>s.Id).SequenceEqual(new[]{4,9,12,31}) && raw.Packets.Count==0 && raw.DecoderSources!.Length==0,
+        "SPI Demo captures four ordered physical signals across batch boundaries without fabricated words");
+    Check(raw.Signals.Single(s=>s.Id==12).Edges.SequenceEqual(new Edge[]{new(8,false),new(60,true)})
+        && raw.Signals.Single(s=>s.Id==31).Edges.Count==48 && raw.Signals.Single(s=>s.Id==31).Edges.First()==new Edge(11,true)
+        && raw.Signals.Single(s=>s.Id==31).Edges.Last()==new Edge(58,false),
+        "SPI raw evidence has one CS interval and exactly 24 mode-0 clocks at independent positions");
+    Check(raw.MeasureAt(31,11) is {WidthSamples:1,PeriodSamples:2} && raw.Signals.Single(s=>s.Id==4).Edges.Contains(new Edge(10,true))
+        && raw.Signals.Single(s=>s.Id==4).Edges.Contains(new Edge(12,false)) && raw.Signals.Single(s=>s.Id==9).Edges.Contains(new Edge(26,true)),
+        "SPI data changes during low CLK and both direction signals support sample-based timing");
+}
 Console.WriteLine($"{passed} acquisition checks passed.");

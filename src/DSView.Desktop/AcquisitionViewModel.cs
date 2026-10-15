@@ -56,9 +56,10 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     public IRelayCommand CloseCommand { get; }
     public IRelayCommand DecodeDemoCommand { get; }
     private DecoderSource? DemoDecoder => model.Capture?.EffectiveDecoderSources.FirstOrDefault(s =>
-        s.Id == "demo-i2c" && s.EffectiveProtocol == "i2c" || s.Id == "demo-uart" && s.EffectiveProtocol == "uart");
+        s.Id == "demo-i2c" && s.EffectiveProtocol == "i2c" || s.Id == "demo-uart" && s.EffectiveProtocol == "uart"
+        || s.Id == "demo-spi" && s.EffectiveProtocol == "spi");
     public bool CanDecodeDemo => decodeRequested != null && !IsBusy && !HasResult && DemoDecoder != null;
-    public string DecodeLabel => DemoDecoder?.EffectiveProtocol == "uart" ? "Decode UART" : "Decode I²C";
+    public string DecodeLabel => DemoDecoder?.EffectiveProtocol switch { "uart" => "Decode UART", "spi" => "Decode SPI", _ => "Decode I²C" };
     public bool IsOpen { get => open; set => SetProperty(ref open, value); }
     public bool IsAcquiring => session != null && sourceTask?.IsCompleted != true;
     public bool IsBusy => StartCommand.IsRunning || AcceptCommand.IsRunning;

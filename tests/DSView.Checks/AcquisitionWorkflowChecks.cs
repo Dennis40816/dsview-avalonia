@@ -39,6 +39,13 @@ internal static class AcquisitionWorkflowChecks
         draft.Rate="345600"; check(draft.TryCreate(out _)!="","UART Demo rejects fewer than four samples per bit");
         draft.Rate="1036800"; check(draft.TryCreate(out settings)=="" && settings!.Frequency==115200,
             "UART accepts nine whole samples per bit without imposing clock half-period rules");
+        draft.Scenario="SPI · Mode 0"; draft.Rate="1000000"; draft.Frequency="100000";
+        draft.DataChannel="4"; draft.MisoChannel="9"; draft.ChipSelectChannel="12";
+        check(draft.TryCreate(out settings)=="" && settings is {Scenario:DemoScenario.Spi,Channel:31,DataChannel:4,MisoChannel:9,ChipSelectChannel:12}
+            && draft.DataChannelLabel.StartsWith("MOSI") && !draft.IsI2c,
+            "SPI setup retains four physical roles and ignores hidden interrupt settings");
+        draft.ChipSelectChannel="9"; check(draft.TryCreate(out _)!="","SPI rejects duplicate CS and MISO pins");
+        draft.ChipSelectChannel="32"; check(draft.TryCreate(out _)!="","SPI rejects a chip-select pin outside D0-D31");
 
         var model=Model(); var old=model.Capture; int published=0;
         await using (var vm=new AcquisitionViewModel(model,()=>true,()=>Task.FromResult(true),_=>published++,_=>Complete()))

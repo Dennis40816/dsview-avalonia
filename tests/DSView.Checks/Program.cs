@@ -16,6 +16,7 @@ if (args.Contains("--demo-workflow-only"))
     await NativeDemoWorkflowChecks.RunAsync(Check,args[config+1]);
     int serialDemo = Array.IndexOf(args,"--native-serial");
     if (serialDemo >= 0) await NativeUartDemoChecks.RunAsync(Check,args[serialDemo+1]);
+    if (serialDemo >= 0) await NativeSpiDemoChecks.RunAsync(Check,args[serialDemo+1]);
     Console.WriteLine($"{passed} Demo workflow checks passed."); return;
 }
 if (args.Contains("--decoder-workflow-only"))
@@ -51,6 +52,7 @@ await DecodeWorkflowChecks.RunAsync(Check);
 await DecoderDraftChecks.RunAsync(Check);
 if (serialOption >= 0) await NativeSerialWorkflowChecks.RunAsync(Check, args[serialOption + 1]);
 if (serialOption >= 0) await NativeUartDemoChecks.RunAsync(Check, args[serialOption + 1]);
+if (serialOption >= 0) await NativeSpiDemoChecks.RunAsync(Check, args[serialOption + 1]);
 if (args.Contains("--cursor-placement-only")) { Console.WriteLine($"{passed} appearance and cursor placement checks passed."); return; }
 var capture = await DemoCaptureSource.LoadAsync();
 var clock = capture.MeasureAt(0, 25025);

@@ -30,13 +30,21 @@
             <TextBlock Text="{Binding Draft.ChannelLabel}" VerticalAlignment="Center" />
             <TextBox Grid.Column="1" Text="{Binding Draft.Channel, Mode=TwoWay}" AutomationProperties.Name="Demo physical channel number" />
           </Grid>
-          <Grid ColumnDefinitions="*,90" IsVisible="{Binding Draft.IsI2c}">
-            <TextBlock Text="SDA · D0–D31" VerticalAlignment="Center" />
-            <TextBox Grid.Column="1" Text="{Binding Draft.DataChannel, Mode=TwoWay}" AutomationProperties.Name="Demo SDA channel number" />
+          <Grid ColumnDefinitions="*,90" IsVisible="{Binding Draft.HasDataChannel}">
+            <TextBlock Text="{Binding Draft.DataChannelLabel}" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Draft.DataChannel, Mode=TwoWay}" AutomationProperties.Name="{Binding Draft.DataChannelLabel}" />
           </Grid>
           <Grid ColumnDefinitions="*,90" IsVisible="{Binding Draft.IsI2c}">
             <TextBlock Text="Interrupt · D0–D31" VerticalAlignment="Center" />
             <TextBox Grid.Column="1" Text="{Binding Draft.InterruptChannel, Mode=TwoWay}" AutomationProperties.Name="Demo interrupt channel number" />
+          </Grid>
+          <Grid ColumnDefinitions="*,90" IsVisible="{Binding Draft.IsSpi}">
+            <TextBlock Text="MISO · D0–D31" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Draft.MisoChannel, Mode=TwoWay}" AutomationProperties.Name="Demo MISO channel number" />
+          </Grid>
+          <Grid ColumnDefinitions="*,90" IsVisible="{Binding Draft.IsSpi}">
+            <TextBlock Text="CS · D0–D31" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Draft.ChipSelectChannel, Mode=TwoWay}" AutomationProperties.Name="Demo chip select channel number" />
           </Grid>
           <StackPanel Spacing="6">
             <TextBlock Text="Sample rate · Hz" Foreground="#9BAEBF" />

@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # Capture acquisition lifecycle
 
 `AcquisitionSession` now provides a background acquisition pipeline and a paced
-raw Clock, I2C + Interrupt and UART Demo sources. The App wires them through an independent acquisition
+raw Clock, I2C + Interrupt, UART and SPI Demo sources. The App wires them through an independent acquisition
 view model, setup pane and Start/Stop/Review action. Native UI interaction and
 layout acceptance are still pending. The native USB preparation component is not
 yet an acquisition source. Existing offline example loading remains separate.
@@ -98,7 +98,15 @@ valid choice. Odd counts such as nine samples per bit also work. This restrictio
 belongs to this deterministic generator, not to imported UART capture analysis.
 The App configures the known TX role and baud, and **Decode UART** runs the shared
 native decoder. The button follows the current capture even when the next
-capture's draft changes. SPI Demo remains pending.
+capture's draft changes.
+
+`DemoSpiSource` generates four physical signals: CLK, MOSI, MISO and active-low CS.
+The fixed format is mode 0, 8 bits, MSB first. Each transfer sends 0x9F, 0x00 and
+0xA5 while receiving 0x00, 0xEF and 0x17. CS asserts before the first clock and
+releases after the last clock; a quiet interval separates transfers. Data changes
+on low CLK. The App configures all four explicit roles and the known format, then
+**Decode SPI** uses the existing native adapter. These are public synthetic words,
+not an emulation of a particular device or a hardware identification result.
 
 The standalone checks depend only on Domain/Infrastructure, without Avalonia or
 native hardware runtimes:
@@ -123,15 +131,17 @@ complete its requested sample count while its last protocol transaction remains
 incomplete; no trailing byte, NACK or STOP is invented. Add
 `--native-serial <configuration>` to that command to check UART acquisition,
 native decoding, exact frame starts, changed baud/pins, save/reopen and capture
-ending before the stop-bit center. Seeing a data word is not proof of a complete
-UART frame. Native UI interaction,
+ending before the stop-bit center. It also checks full-duplex SPI words, exact CS
+intervals, CS-to-clock measurement, independent MISO selection and truncated words.
+Seeing a data word is not proof of a complete UART frame or SPI transfer. Native UI interaction,
 structured saved metadata and live display performance still require evidence.
 
 ## App workflow
 
-The header's **Demo** button opens Capture setup. It offers Clock, I2C + Interrupt
-and UART 8N1 scenarios with physical channels, sample rate and duration. Clock/I2C
-show clock frequency; UART shows baud rate and hides the I2C-only roles. The
+The header's **Demo** button opens Capture setup. It offers Clock, I2C + Interrupt,
+UART 8N1 and SPI Mode 0 scenarios with physical channels, sample rate and duration.
+Clock/I2C/SPI show clock frequency; UART shows baud rate. Each scenario shows only
+its own channel roles; hidden roles do not participate in validation. The
 defaults request one second at 1 MS/s with a 10 kHz clock. Invalid or fractional
 sample timing cannot start. Switching scenarios preserves the entered timing.
 I2C requires three distinct channels and four whole sample intervals per cycle.
