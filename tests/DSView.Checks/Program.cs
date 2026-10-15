@@ -7,6 +7,8 @@ using DSView.Infrastructure;
 if (args.FirstOrDefault() == "--worker-lifetime-probe") { await NativeWorkerJobChecks.RunProbeAsync(args); return; }
 int passed = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); Console.WriteLine("PASS " + name); passed++; }
+await AcquisitionWorkflowChecks.RunAsync(Check);
+if (args.Contains("--acquisition-workflow-only")) { Console.WriteLine($"{passed} acquisition workflow checks passed."); return; }
 if (args.Contains("--decoder-workflow-only"))
 {
     await DecodeWorkflowChecks.RunAsync(Check);

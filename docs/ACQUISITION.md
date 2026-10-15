@@ -6,9 +6,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # Capture acquisition lifecycle
 
 `AcquisitionSession` now provides a background acquisition pipeline and a paced
-raw clock Demo source. It is not yet wired to the App's source selector or Start
-control. The native USB preparation component is also not yet an acquisition
-source. Existing offline example loading remains separate.
+raw clock Demo source. The App now wires it through an independent acquisition
+view model, setup pane and Start/Stop/Review action. Native UI interaction and
+layout acceptance are still pending. The native USB preparation component is not
+yet an acquisition source. Existing offline example loading remains separate.
 
 ## Source contract
 
@@ -38,8 +39,8 @@ terminate a producer that ignores cancellation and refuses to return.
 One session owns one producer, queue and consumer. Repeated `RunAsync` calls return
 the same task. `Progress` is a polled value snapshot; it never exposes mutable
 waveform lists or raises per-sample UI notifications. Each session has a unique
-operation ID. The future App owner must match that ID before publishing results
-and await cancellation/disposal before replacing the source.
+operation ID. The App owner matches that ID and its operation generation before
+publishing results, and awaits cancellation before file source replacement.
 
 | Operation or outcome | Behavior |
 | --- | --- |
@@ -95,5 +96,39 @@ short data, marked partial outcomes, waiting for teardown, late results after
 abort, and the real clock source with manually advanced timers. Timing assertions
 use independent sample positions; tests do not sleep for an expected duration.
 These are managed acquisition behavior checks, not App interaction or hardware
-acceptance. UI source switching/publication, protocol scenarios, saved metadata
+acceptance. Additional checks in `DSView.Checks --acquisition-workflow-only` exercise
+the App owner, including source replacement, partial acceptance, pending edits and
+save/reopen. Native UI interaction, protocol scenarios, structured saved metadata
 and live display performance still require integration evidence.
+
+## App workflow
+
+The header's **Demo** button opens Capture setup. It currently offers one Clock
+scenario with physical channel, sample rate, duration and clock frequency. The
+defaults request one second at 1 MS/s with a 10 kHz clock. Invalid or fractional
+sample timing cannot start. No USB device is presented as ready by this screen.
+
+**Start** changes to **Stop** during acquisition. The existing waveform remains
+available for inspection. Completion validates a new analysis off-thread before
+publication; unsaved analysis uses the existing save/discard/cancel question.
+Current source identity, operation generation and pending edits are checked again
+after asynchronous preparation. A changed view during preparation keeps the new
+capture pending instead of overwriting that change.
+
+Stopped or incomplete data opens the pane with **Use partial capture** and **Keep
+current analysis**. A retained result remains reachable through **Review** if the
+pane is closed. **Cancel acquisition** discards new samples and waits for producer
+cleanup. Closing the window with an active or pending acquisition asks before
+discarding it. File picker/save/replacement prompts inhibit automatic publication.
+
+The setup pane shares the existing right-side context area with decoder settings
+and packet details. It adds no permanent measurement row. A small header progress
+bar polls retained samples at 100 ms intervals; it does not yet render incoming
+waveforms. Applying a capture shows All signals so a selected high-numbered Demo
+channel is visible. Existing Group preferences remain available.
+
+For native acceptance, check D0 and D31, Start/Stop/Review, numeric errors, short
+stops, unsaved-analysis decisions, file dialogs, close/cancel, large fonts and
+minimum window width. Verify cursor measurements against the selected clock and
+save/reopen the resulting analysis. Compiled bindings and view-model checks do
+not substitute for those actions in the real App.

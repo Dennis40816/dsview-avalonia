@@ -17,12 +17,14 @@ public sealed partial class MainWindow
         {
             await FileMessageAsync("Capture import unavailable", "This build does not include a configured DSView capture reader. You can still open saved DSView2 analyses."); return;
         }
+        fileInteractionDepth++;
         try
         {
             var chosen = await StorageProvider.OpenFilePickerAsync(new() { Title = "Import DSView capture", AllowMultiple = false, FileTypeFilter = [CaptureType] });
             if (chosen.Count == 0) return;
             string path = Path.GetFullPath(chosen[0].TryGetLocalPath() ?? throw new IOException("Choose a local capture file."));
             if (!await ConfirmReplacementAsync()) return;
+            await _acquisition.StopAsync();
             var preferences = personalPreferences ?? CurrentPreferences();
             fileBusy = true; loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new(); int request = ++generation;
             var cancellation = loadCancellation.Token;
@@ -38,7 +40,7 @@ public sealed partial class MainWindow
                 updating = true;
                 try { Model.ApplyAnalysis(prepared); }
                 finally { updating = false; }
-                importedPath = path; analysisPath = null; sessionSourceName = result.SourceName;
+                importedPath = path; analysisPath = null; acquiredCapture = false; sessionSourceName = result.SourceName;
                 renderedPacket = null; renderedIssue = null; ResetNumericErrors(); Refresh();
                 waveScroll.Offset = default; edgeChannel.SelectedItem = $"D{result.Capture.Signals[0].Id}";
                 // The raw file is unchanged; this new analysis has not been saved yet.
@@ -49,5 +51,6 @@ public sealed partial class MainWindow
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { await FileMessageAsync("Import failed", "Current analysis was kept.\n" + FileFailureReason(ex)); }
+        finally { fileInteractionDepth--; _acquisition.Poll(); }
     }
 }

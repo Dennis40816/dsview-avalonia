@@ -15,7 +15,8 @@ namespace DSView.Desktop;
 
 public sealed partial class MainWindow
 {
-    private bool fileBusy, closePrompt, closeApproved, openingFile;
+    private bool fileBusy, closePrompt, closeApproved, openingFile, acquiredCapture, replacementPrompt;
+    private int fileInteractionDepth;
     private string? analysisPath, baselineState;
     private string sessionSourceName = "";
     private Capture? baselineCapture;
@@ -47,7 +48,7 @@ public sealed partial class MainWindow
         ToolTip.SetTip(status, analysisPath ?? importedPath);
         UpdateAnalysisTitle();
     }
-    private void UpdateAnalysisTitle() => Title = "DSView2 · " + (analysisPath != null ? Path.GetFileName(analysisPath) : importedPath != null ? Path.GetFileName(importedPath) : "Offline demo") + (HasAnalysisChanges ? " *" : "");
+    private void UpdateAnalysisTitle() => Title = "DSView2 · " + (analysisPath != null ? Path.GetFileName(analysisPath) : importedPath != null ? Path.GetFileName(importedPath) : acquiredCapture ? CurrentSourceName : "Offline demo") + (HasAnalysisChanges ? " *" : "");
     private void ScheduleTitleUpdate() { if (!titleUpdate.IsEnabled) titleUpdate.Start(); }
     private void SetOpening(bool opening)
     {
@@ -55,6 +56,7 @@ public sealed partial class MainWindow
         _shell.Body.IsEnabled = !opening;
         foreach (var control in _shell.Header.Children)
             control.IsEnabled = !opening || ReferenceEquals(control, reloadButton);
+        _acquisition.Poll();
     }
     private void ShowFiles()
     {
@@ -72,7 +74,7 @@ public sealed partial class MainWindow
             Command("Save analysis       Ctrl+S", () => _ = SaveAnalysisAsync(false), Model.Capture != null);
             Command("Save analysis as…  Ctrl+Shift+S", () => _ = SaveAnalysisAsync(true), Model.Capture != null);
             body.Children.Add(new Separator());
-            if (analysisPath == null && importedPath == null) Command("Reload example", () => _ = LoadAsync(activeExample));
+            if (analysisPath == null && importedPath == null && !acquiredCapture) Command("Reload example", () => _ = LoadAsync(activeExample));
             Command("Capture source…", ShowInfo, Model.Capture != null);
         }
         openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(reloadButton);
@@ -81,12 +83,14 @@ public sealed partial class MainWindow
     {
         if (fileBusy || closePrompt) return;
         _decoder.Close();
+        fileInteractionDepth++;
         try
         {
             var chosen = await StorageProvider.OpenFilePickerAsync(new() { Title = "Open DSView2 analysis", AllowMultiple = false, FileTypeFilter = [AnalysisType] });
             if (chosen.Count == 0) return;
             string path = chosen[0].TryGetLocalPath() ?? throw new IOException("Choose a local analysis file.");
             if (!await ConfirmReplacementAsync()) return;
+            await _acquisition.StopAsync();
             fileBusy = true; loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new(); int request = ++generation;
             SetOpening(true);
             status.Text = "Opening " + Path.GetFileName(path) + "…";
@@ -99,7 +103,7 @@ public sealed partial class MainWindow
                 updating = true;
                 try { Model.ApplyAnalysis(prepared); }
                 finally { updating = false; }
-                analysisPath = path; importedPath = null; sessionSourceName = document.SourceName;
+                analysisPath = path; importedPath = null; acquiredCapture = false; sessionSourceName = document.SourceName;
                 renderedPacket = null; renderedIssue = null; ResetNumericErrors(); Refresh();
                 edgeChannel.SelectedItem = document.State.EdgeChannel is int id ? $"D{id}" : null;
                 baselineCapture = document.Capture; baselineState = AnalysisFile.StateKey(document.State);
@@ -118,6 +122,7 @@ public sealed partial class MainWindow
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { await FileMessageAsync("Open failed", "Current analysis was kept.\n" + FileFailureReason(ex)); }
+        finally { fileInteractionDepth--; _acquisition.Poll(); }
     }
     private async Task<bool> SaveAnalysisAsync(bool saveAs)
     {
@@ -130,6 +135,7 @@ public sealed partial class MainWindow
         {
             await FileMessageAsync("Finish the measurement edit", "Finish or cancel the current measurement edit before saving. Your committed measurement is unchanged."); return false;
         }
+        fileInteractionDepth++;
         try
         {
             string? path = saveAs ? null : analysisPath;
@@ -158,6 +164,7 @@ public sealed partial class MainWindow
         }
         catch (OperationCanceledException) { return false; }
         catch (Exception ex) { await FileMessageAsync("Save failed", "Your analysis and any previous file were kept.\n" + FileFailureReason(ex)); return false; }
+        finally { fileInteractionDepth--; _acquisition.Poll(); }
     }
     private static string FileFailureReason(Exception error) => error switch
     {
@@ -171,9 +178,15 @@ public sealed partial class MainWindow
     };
     private async Task<bool> ConfirmReplacementAsync()
     {
+        if (replacementPrompt) return false;
         if (!HasAnalysisChanges) return true;
-        int choice = await FileQuestionAsync("Keep your analysis?", "Your view or analysis has changed. Save it before leaving?", ["Cancel", "Discard changes", "Save analysis"]);
-        return choice == 1 || (choice == 2 && await SaveAnalysisAsync(false));
+        replacementPrompt = true;
+        try
+        {
+            int choice = await FileQuestionAsync("Keep your analysis?", "Your view or analysis has changed. Save it before leaving?", ["Cancel", "Discard changes", "Save analysis"]);
+            return choice == 1 || (choice == 2 && await SaveAnalysisAsync(false));
+        }
+        finally { replacementPrompt = false; _acquisition.Poll(); }
     }
     private async void ClosingAnalysis(object? sender, WindowClosingEventArgs e)
     {
@@ -185,6 +198,9 @@ public sealed partial class MainWindow
         closePrompt = true;
         try
         {
+            if ((_acquisition.IsAcquiring || _acquisition.HasResult) && await FileQuestionAsync("Discard acquisition?",
+                "The new acquisition has not been saved. Discard it and continue closing?", ["Keep working", "Discard acquisition"]) != 1) return;
+            await _acquisition.StopAsync();
             await _decoder.StopAsync();
             if (fileBusy) { loadCancellation?.Cancel(); await FileMessageAsync("Stopping file operation", "Close the window again after the file operation stops."); return; }
             if (await ConfirmReplacementAsync()) { closeApproved = true; Close(); }

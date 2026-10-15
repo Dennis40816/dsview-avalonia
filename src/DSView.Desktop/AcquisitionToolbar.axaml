@@ -1,0 +1,18 @@
+<!-- SPDX-FileCopyrightText: 2026 Dennis40816; SPDX-License-Identifier: GPL-3.0-or-later -->
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:DSView.Desktop" x:Class="DSView.Desktop.AcquisitionToolbar"
+             x:DataType="local:AcquisitionViewModel" x:CompileBindings="True">
+  <Grid RowDefinitions="*,2" Margin="8,6">
+    <StackPanel Orientation="Horizontal" Spacing="8">
+      <Button Content="Demo ▾" Classes="flat" Command="{Binding ToggleCommand}" ToolTip.Tip="Acquisition source and settings" AutomationProperties.Name="Demo capture setup" />
+      <Button Classes="primary" Command="{Binding PrimaryCommand}" MinWidth="82" AutomationProperties.Name="{Binding PrimaryLabel}">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Path Data="M3,2 L14,8 L3,14 Z" Width="12" Height="14" Stretch="Uniform" Fill="#10231F" IsVisible="{Binding ShowStartIcon}" />
+          <Path Data="M2,2 L14,2 L14,14 L2,14 Z" Width="12" Height="12" Stretch="Uniform" Fill="#10231F" IsVisible="{Binding IsAcquiring}" />
+          <TextBlock Text="{Binding PrimaryLabel}" />
+        </StackPanel>
+      </Button>
+    </StackPanel>
+    <ProgressBar Grid.Row="1" Minimum="0" Maximum="100" Value="{Binding Progress}" IsVisible="{Binding IsAcquiring}" Height="2" />
+  </Grid>
+</UserControl>

@@ -25,6 +25,8 @@ public sealed partial class MainWindow : Window
     private readonly WorkbenchShell _shell;
     private readonly DecoderViewModel _decoder;
     private readonly DecoderView _decoderView;
+    private readonly AcquisitionViewModel _acquisition;
+    private readonly AcquisitionView _acquisitionView;
     private readonly SettingsView _settingsView = new(new LocalAppearanceStore()) { IsVisible = false };
     private readonly ComboBox modePicker = new() { ItemsSource = new[] { "Snap to edge", "Position" }, SelectedIndex = 0, Width = 134 };
     private readonly ComboBox edgeChannel = new() { Width = 74 };
@@ -73,6 +75,16 @@ public sealed partial class MainWindow : Window
         Title = "DSView2 · Offline demo"; Width = 1380; Height = 850; MinWidth = 1024; MinHeight = 650;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         _decoder = new(Model);
+        _acquisition = new(Model, () => !fileBusy && fileInteractionDepth == 0 && !replacementPrompt && !closePrompt && !_settingsView.Model.IsOpen && !NumericDraft && invalidTimes.Count == 0,
+            ConfirmReplacementAsync, result =>
+            {
+                analysisPath = null; importedPath = null; acquiredCapture = true;
+                sessionSourceName = "Demo · " + result.Plan.SourceName + (result.Termination == AcquisitionTermination.Completed ? "" : " · Partial");
+                baselineCapture = null; baselineState = null; renderedPacket = null; renderedIssue = null;
+                ResetNumericErrors(); waveScroll!.Offset = default; edgeChannel.SelectedItem = $"D{result.Plan.Channels[0].Id}";
+                Refresh(); UpdateSourceIdentity();
+            });
+        _acquisitionView = new() { DataContext = _acquisition, IsVisible = false };
         _decoderView = new() { DataContext = _decoder, IsVisible = false };
         _shell = new(ShowActivity, () => _ = ShowTimingResultsAsync(), ShowIssues, ShowSettings, ShowDecoders);
         RestorePreferences();
@@ -82,9 +94,10 @@ public sealed partial class MainWindow : Window
         var brand = Text("DSView2"); brand.FontWeight = FontWeight.SemiBold; brand.Margin = new(0, 0, 20, 0);
         Add(header, brand, 0);
         var source = Button("", ShowInfo, "flat", "Capture source and acquisition details"); source.Content = status; source.HorizontalAlignment = HorizontalAlignment.Left; Add(header, source, 0, 1);
-        reloadButton = Button("File ▾", ShowFiles, "flat", "Import a capture, or open and save an analysis"); Add(header, reloadButton, 0, 2);
-        Add(header, _shell.Settings, 0, 3);
-        status.MaxWidth = 560; status.TextTrimming = TextTrimming.CharacterEllipsis;
+        Add(header, new AcquisitionToolbar { DataContext = _acquisition }, 0, 2);
+        reloadButton = Button("File ▾", ShowFiles, "flat", "Import a capture, or open and save an analysis"); Add(header, reloadButton, 0, 3);
+        Add(header, _shell.Settings, 0, 4);
+        status.MaxWidth = 400; status.TextTrimming = TextTrimming.CharacterEllipsis;
         Add(page, Band(header), 0);
         waveTab = Button("Waveforms", () => Model.SetTab(false), "flat"); packetTab = Button("Packets", () => Model.SetTab(true), "flat"); waveTab.Classes.Add("tab"); packetTab.Classes.Add("tab");
         detailButton = IconButton("Packet details", ActionIcons.Details, Model.ToggleDetails);
@@ -147,7 +160,7 @@ public sealed partial class MainWindow : Window
         packets.SelectionChanged += (_, _) => { if (!updating && packets.SelectedItem is Packet packet) Model.Select(packet); };
         var work = new Grid(); work.Children.Add(wavePanel); work.Children.Add(packetPanel); Add(workspace, work, 0, 0); Add(workspace, splitter, 0, 1);
         inspectorBorder = new Border { BorderBrush = TimelineControl.Ink("#26343F"), BorderThickness = new(1, 0, 0, 0), Child = new ScrollViewer { Content = inspector, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled } };
-        Add(workspace, inspectorBorder, 0, 2); Add(workspace, _decoderView, 0, 2); Add(center, workspace, 3);
+        Add(workspace, inspectorBorder, 0, 2); Add(workspace, _decoderView, 0, 2); Add(workspace, _acquisitionView, 0, 2); Add(center, workspace, 3);
         Grid.SetColumn(center, 1); _shell.Body.Children.Insert(0, center);
         Add(page, _shell.Body, 1); Add(page, _settingsView, 1);
         SizeChanged += (_, _) => UpdateShellLayout();
@@ -180,11 +193,17 @@ public sealed partial class MainWindow : Window
         hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(waveformGrid, Band(measurement), 1);
         WireAppearance(); Content = page; Model.Changed += Refresh;
         _decoder.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DecoderViewModel.IsOpen)) Refresh(); };
+        _acquisition.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(AcquisitionViewModel.IsOpen)) return;
+            if (_acquisition.IsOpen) _decoder.Close();
+            Refresh();
+        };
         Model.Changed += ScheduleTitleUpdate;
         titleUpdate.Tick += (_, _) => { titleUpdate.Stop(); UpdateAnalysisTitle(); };
         aTime.TextChanged += (_, _) => ScheduleTitleUpdate(); bTime.TextChanged += (_, _) => ScheduleTitleUpdate();
         Opened += async (_, _) => await LoadAsync(activeExample); Closing += ClosingAnalysis;
-        Closed += (_, _) => { _decoder.Dispose(); titleUpdate.Stop(); loadCancellation?.Cancel(); ++generation; };
+        Closed += async (_, _) => { _decoder.Dispose(); await _acquisition.DisposeAsync(); titleUpdate.Stop(); loadCancellation?.Cancel(); ++generation; };
         KeyDown += (_, e) =>
         {
             if (_settingsView.Model.IsOpen) { if (e.Key == Key.Escape && _settingsView.Model.CancelCommand.CanExecute(null)) { _settingsView.Model.CancelCommand.Execute(null); e.Handled = true; } return; }
@@ -195,6 +214,7 @@ public sealed partial class MainWindow : Window
             if (e.Key != Key.Escape) return;
             if (Model.Armed != null || aTime.IsFocused || bTime.IsFocused) { CancelEditing(); e.Handled = true; }
             else if (_decoder.IsOpen) { _decoder.Close(); e.Handled = true; }
+            else if (_acquisition.IsOpen) { _acquisition.IsOpen = false; e.Handled = true; }
             else if (Model.Details) Model.ToggleDetails();
         };
         Refresh(); UpdateShellLayout();
@@ -208,6 +228,7 @@ public sealed partial class MainWindow : Window
             _settingsView.IsVisible = _settingsView.Model.IsOpen; _shell.Body.IsEnabled = !_settingsView.Model.IsOpen && !openingFile;
             foreach (var child in _shell.Header.Children)
                 child.IsEnabled = !_settingsView.Model.IsOpen && (!openingFile || ReferenceEquals(child, reloadButton)) || ReferenceEquals(child, _shell.Settings);
+            _acquisition.Poll();
         }
         _settingsView.Model.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(AppearanceSettingsViewModel.Current)) RefreshAppearance(); };
         RefreshAppearance();
@@ -223,6 +244,7 @@ public sealed partial class MainWindow : Window
     private void ShowDecoders()
     {
         if (fileBusy || _settingsView.Model.IsOpen) return;
+        _acquisition.IsOpen = false;
         openPanel?.Hide(); _shell.DismissCompact();
         if (_decoder.IsOpen) _decoder.Close(); else _decoder.Open();
     }
@@ -235,11 +257,12 @@ public sealed partial class MainWindow : Window
     private int SelectedEdgeChannel() => edgeChannel.SelectedItem is string str && int.TryParse(str.AsSpan(1), out var id) ? id : Model.Group.Channels.FirstOrDefault();
     private void UpdateRulerWidth() => ruler.Width = Model.Signals.Count > 0 ? timeline.Bounds.Width : wavePanel.Bounds.Width;
     private string CurrentSourceName => string.IsNullOrEmpty(sessionSourceName) ? activeExample.Name : sessionSourceName;
-    private string SourceSummary(Capture capture) => $"{(analysisPath != null ? "Saved analysis · " + Path.GetFileName(analysisPath) : importedPath != null ? "Imported · " + CurrentSourceName : "Offline · " + activeExample.Name)} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
+    private string SourceSummary(Capture capture) => $"{(analysisPath != null ? "Saved analysis · " + Path.GetFileName(analysisPath) : importedPath != null ? "Imported · " + CurrentSourceName : acquiredCapture ? CurrentSourceName : "Offline · " + activeExample.Name)} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
     private async Task LoadAsync(DemoExample example)
     {
         _decoder.Close();
         if (fileBusy || !await ConfirmReplacementAsync()) return;
+        await _acquisition.StopAsync();
         loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new(); int current = ++generation;
         string showing = Model.Capture is { } loaded ? SourceSummary(loaded) : "No capture";
         status.Text = showing + $" · Loading {example.Name}…"; fileBusy = true; SetOpening(true);
@@ -250,7 +273,7 @@ public sealed partial class MainWindow : Window
             if (current == generation)
             {
                 renderedPacket = null; renderedIssue = null; ResetNumericErrors();
-                RestorePersonalSettings(); analysisPath = null; importedPath = null; sessionSourceName = example.Name;
+                RestorePersonalSettings(); analysisPath = null; importedPath = null; acquiredCapture = false; sessionSourceName = example.Name;
                 Model.Load(capture); activeExample = example; waveScroll.Offset = default;
                 baselineCapture = capture; baselineState = AnalysisFile.StateKey(CurrentAnalysisState());
                 UpdateSourceIdentity();
@@ -324,11 +347,12 @@ public sealed partial class MainWindow : Window
             foreach (string unit in new[] { "ns", "µs", "ms", "s", "Hz", "kHz", "MHz" }) delta.Text = delta.Text?.Replace(" " + unit, "\u00a0" + unit, StringComparison.Ordinal);
             ToolTip.SetTip(delta, Model.Armed != null ? Model.Hint : Model.PinnedMeasurement is { } m ? $"Local measurement · pulse samples {m.Pulse?.Start}–{m.Pulse?.End}\n" + (m.Cycle is { } cycle ? $"Cycle samples {cycle.Start}–{cycle.End}. This is a local cycle, not a capture-wide frequency." : m.Reason) : "Signed interval between A and B");
             ToolTip.SetTip(aSource, Model.A == null ? "" : $"Sample {Model.A.Sample} · {(Model.A.IsEdge ? "edge" : "position")}"); ToolTip.SetTip(bSource, Model.B == null ? "" : $"Sample {Model.B.Sample} · {(Model.B.IsEdge ? "edge" : "position")}");
-            bool showDetails = Model.Details && Model.Selected != null && !_decoder.IsOpen;
-            bool showPanel = showDetails || _decoder.IsOpen;
+            bool showDetails = Model.Details && Model.Selected != null && !_decoder.IsOpen && !_acquisition.IsOpen;
+            bool showPanel = showDetails || _decoder.IsOpen || _acquisition.IsOpen;
             if (showPanel && workspace.ColumnDefinitions[2].Width.Value == 0) { workspace.ColumnDefinitions[1].Width = new(4); workspace.ColumnDefinitions[2].Width = new(320); }
             if (!showPanel) { workspace.ColumnDefinitions[1].Width = new(0); workspace.ColumnDefinitions[2].Width = new(0); }
             _decoderView.IsVisible = _decoder.IsOpen;
+            _acquisitionView.IsVisible = _acquisition.IsOpen;
             inspectorBorder.IsVisible = showDetails; splitter.IsVisible = showPanel; detailButton.IsVisible = Model.Selected != null && !showDetails && !_decoder.IsOpen;
             if (showDetails && (!ReferenceEquals(renderedPacket, Model.Selected) || !ReferenceEquals(renderedIssue, Model.SelectedIssue) || renderedProtocolIndex != Model.SelectedProtocolIndex)) { RenderInspector(); renderedPacket = Model.Selected; renderedIssue = Model.SelectedIssue; renderedProtocolIndex = Model.SelectedProtocolIndex; }
             UpdateShellLayout();

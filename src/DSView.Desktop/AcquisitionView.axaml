@@ -1,0 +1,51 @@
+<!-- SPDX-FileCopyrightText: 2026 Dennis40816; SPDX-License-Identifier: GPL-3.0-or-later -->
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:DSView.Desktop" x:Class="DSView.Desktop.AcquisitionView"
+             x:DataType="local:AcquisitionViewModel" x:CompileBindings="True">
+  <UserControl.Styles>
+    <Style Selector="TextBox"><Setter Property="CornerRadius" Value="0" /><Setter Property="BorderThickness" Value="0,0,0,1" /></Style>
+  </UserControl.Styles>
+  <Border Background="#141F29" BorderBrush="#26343F" BorderThickness="1,0,0,0">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="18" Margin="18">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="Capture" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Classes="flat" Command="{Binding CloseCommand}" Width="32" Padding="8"
+                  ToolTip.Tip="Close capture setup" AutomationProperties.Name="Close capture setup">
+            <Path Data="M3,3 L13,13 M13,3 L3,13" Width="16" Height="16" Stretch="Uniform" Stroke="#C7D2DB" StrokeThickness="1.6" />
+          </Button>
+        </Grid>
+        <StackPanel Spacing="6">
+          <TextBlock Text="Source" Foreground="#9BAEBF" />
+          <TextBlock Text="Demo · Clock" FontWeight="SemiBold" />
+          <TextBlock Text="Generated signal. No device needed." Foreground="#9BAEBF" TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Spacing="14" IsEnabled="{Binding CanEdit}">
+          <Grid ColumnDefinitions="*,90">
+            <TextBlock Text="Signal number · D0–D31" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Draft.Channel, Mode=TwoWay}" AutomationProperties.Name="Demo physical channel number" />
+          </Grid>
+          <StackPanel Spacing="6">
+            <TextBlock Text="Sample rate · Hz" Foreground="#9BAEBF" />
+            <TextBox Text="{Binding Draft.Rate, Mode=TwoWay}" AutomationProperties.Name="Demo sample rate in Hertz" />
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="Duration · ms" Foreground="#9BAEBF" />
+            <TextBox Text="{Binding Draft.Duration, Mode=TwoWay}" AutomationProperties.Name="Demo duration in milliseconds" />
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="Clock frequency · Hz" Foreground="#9BAEBF" />
+            <TextBox Text="{Binding Draft.Frequency, Mode=TwoWay}" AutomationProperties.Name="Demo clock frequency in Hertz" />
+          </StackPanel>
+        </StackPanel>
+        <TextBlock Text="{Binding Problem}" IsVisible="{Binding HasProblem}" Foreground="#FFCC80" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Status}" IsVisible="{Binding HasStatus}" TextWrapping="Wrap" />
+        <StackPanel Spacing="8" IsVisible="{Binding HasResult}">
+          <Button Content="{Binding ResultLabel}" Classes="primary" Command="{Binding AcceptCommand}" HorizontalAlignment="Stretch" />
+          <Button Content="Keep current analysis" Classes="flat" Command="{Binding DiscardCommand}" HorizontalAlignment="Stretch" />
+        </StackPanel>
+        <Button Content="Cancel acquisition" Classes="flat" Command="{Binding CancelCommand}" IsVisible="{Binding IsAcquiring}" HorizontalAlignment="Left" />
+      </StackPanel>
+    </ScrollViewer>
+  </Border>
+</UserControl>

@@ -10,9 +10,10 @@ instrument or hardware driver installation. The existing offline examples load
 complete captures; they do not yet implement the acquisition lifecycle below.
 
 The first [acquisition pipeline](ACQUISITION.md) and `DemoClockSource` are now
-implemented and behavior-tested. They are not yet connected to App controls.
-Clock delivery, stopping, owned batches and partial-result handling are available
-at the backend boundary; protocol scenarios and the complete workflow remain open.
+implemented and behavior-tested. App controls now connect Clock setup,
+Start/Stop/Review, partial-result acceptance and safe publication. Native UI
+interaction/layout acceptance, protocol scenarios and the complete Demo workflow
+remain open.
 
 ## User workflow
 

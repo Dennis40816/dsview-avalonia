@@ -13,7 +13,7 @@ internal sealed class WorkbenchShell
     private LayoutMode _mode = LayoutMode.WideOpen;
     private readonly Border _sidebar = new() { Background = TimelineControl.Ink("#141F29"), BorderBrush = TimelineControl.Ink("#26343F"), BorderThickness = new(0, 0, 1, 0) };
     private readonly Button _close;
-    public Grid Header { get; } = new() { ColumnDefinitions = new("Auto,*,Auto,Auto"), Margin = new(16, 0) };
+    public Grid Header { get; } = new() { ColumnDefinitions = new("Auto,*,Auto,Auto,Auto"), Margin = new(16, 0) };
     public Grid Body { get; } = new() { ColumnDefinitions = new("220,*") };
     public TextBlock ActiveGroup { get; } = new() { TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis, Margin = new(16, 0), VerticalAlignment = VerticalAlignment.Center, Foreground = TimelineControl.Ink("#9BAEBF") };
     public Button Toggle { get; }
