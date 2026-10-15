@@ -66,7 +66,7 @@ Readback uses that same owned instance and returns a value snapshot containing
 driver/type/mode, sample rate/limit and enabled physical channel IDs. A failed
 readback clears the output and revokes the connection. Closed snapshots remain
 historical values; their generation cannot authorize new operations. This is a
-small native component, not an App device session or an implemented USB connector.
+small native component, not an App device session.
 
 Ten direct-owner checks pass against the real saved-session driver, including
 the previously demonstrated first-open and switching failures. That probe does
@@ -86,8 +86,35 @@ accepts `SR_CONF_CONN` as a bus/address filter, but global initialization passes
 no filter; `sr_usb_find` rejects buses above 64 although descriptor bus numbers
 have a wider range. Firmware/profile detection can open the device and initiate
 firmware loading. The lower open path can retain `SR_ST_INCOMPATIBLE` for a firmware
-version mismatch. A selected-device scope, retained native identity and explicit
-firmware/re-enumeration result are therefore needed before enabling acquisition.
+version mismatch. The selected-device preparation component below now provides
+the native selection boundary; worker/App integration remains pending.
+
+### Selected USB preparation
+
+`tools/native/selected-usb.c` retains one libusb device reference after matching
+a unique bus/address and its descriptor, speed and known port path. It performs
+no opens or transfers. Unknown topology stays unknown. Rechecking uses the retained
+object, not a global scan or the upstream bus-64-limited connection filter.
+This reference is valid only within its libusb context and is not persistent
+physical identity across unplugging or re-enumeration.
+
+`tools/native/dslogic-selected.c` is compiled after the pinned DSLogic source in
+the same translation unit. It reuses the upstream profile table and instance
+factory, without calling its scan function. Only the retained device is opened
+for profile strings. Access and read failures are separate from missing firmware.
+Firmware loading requires an explicit caller flag and resource directory; success
+returns re-enumeration-required with no candidate. Firmware admission/provenance
+and re-selection still need integration before this can be used from the App.
+
+A ready profile produces an inactive candidate for the direct device owner.
+It is not a connected or capture-ready device. The selection must outlive the
+candidate and owner; destroy them before releasing the retained reference.
+
+`tools/native/dsl-connection-guards.patch` stops an incompatible firmware version
+before interface claim/configuration and requires exact control-read lengths.
+The patch applies to isolated pinned sources; it does not modify the upstream
+checkout. See [the selected-USB probe](../tests/native/SELECTED-USB-PROBE.md) for
+reproduction and the distinction between controlled transport and real hardware.
 
 ## Implemented descriptor-only observation
 

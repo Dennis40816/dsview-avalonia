@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: 2026 Dennis40816
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Pinned DSView native connection guards; retain upstream source licenses.
+
+--- a/libsigrok4DSL/hardware/DSL/dsl.c
++++ b/libsigrok4DSL/hardware/DSL/dsl.c
+@@ -376,6 +376,7 @@
+                 vi.major, vi.minor);
+         ds_set_last_error(SR_ERR_DEVICE_FIRMWARE_VERSION_LOW);
+         sdi->status = SR_ST_INCOMPATIBLE;
++        return SR_ERR; /* DSView2: stop before claiming/configuring incompatible firmware. */
+     }
+     else {
+         sdi->status = SR_ST_ACTIVE;
+--- a/libsigrok4DSL/hardware/DSL/command.c
++++ b/libsigrok4DSL/hardware/DSL/command.c
+@@ -54,7 +54,7 @@
+     ret = libusb_control_transfer(devhdl, LIBUSB_REQUEST_TYPE_VENDOR |
+             LIBUSB_ENDPOINT_OUT, CMD_CTL_RD_PRE, 0x0000, 0x0000,
+             (unsigned char *)&cmd, sizeof(struct ctl_header), 3000);
+-    if (ret < 0) {
++    if (ret != (int)sizeof(struct ctl_header)) {
+         sr_err("Unable to send CMD_CTL_RD_PRE command(dest:%d/offset:%d/size:%d): %s.",
+                cmd.header.dest, cmd.header.offset, cmd.header.size,
+                libusb_error_name(ret));
+@@ -68,7 +68,7 @@
+         LIBUSB_ENDPOINT_IN, CMD_CTL_RD, 0x0000, 0x0000,
+         (unsigned char *)cmd.data, cmd.header.size, 3000);
+ 
+-    if (ret < 0) {
++    if (ret != cmd.header.size) {
+         sr_err("Unable to send CMD_CTL_RD command: %s.",
+                libusb_error_name(ret));
+         return SR_ERR;
