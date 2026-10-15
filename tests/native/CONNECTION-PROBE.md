@@ -46,3 +46,25 @@ generation, including revocation before activation or release begins.
 
 The native build retains upstream compiler warnings. Its manifest identifies the
 source and binary; it is not a dependency SBOM or redistribution approval.
+
+## Direct instance ownership
+
+Pass `--direct-owner` to both scripts to exercise
+`tools/native/device-owner.c` using `device-owner-probe.c`. Use a fresh build and
+check output directory. This variant stages 22 upstream files and does **not**
+link `lib_main.c` or initialize the global manager or hotplug thread. It opens
+real saved-session driver instances directly; unexpected acquisition or hardware
+configuration calls terminate the child instead of returning fake success.
+
+Ten grouped checks cover six child sessions. The same moved-file scenarios now
+retain the original open error and destroy the failed instance. Readback failure
+revokes the connection, and both old and new generations are unusable after a
+failed switch. An additional check reads a copied snapshot after native instance
+destruction: its metadata remains intact while its generation is stale.
+
+The owner is logic-only with at most 32 physical channels. It requires inactive,
+unregistered instances and one controlling thread. It has no acquisition or
+hotplug implementation. USB discovery-to-instance selection, actual device access,
+capability combinations and physical configuration verification remain separate
+integration work. A successful file-session check cannot enable an App Start
+button or certify a hardware connection.

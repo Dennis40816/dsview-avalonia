@@ -13,6 +13,7 @@ import threading
 import zipfile
 
 parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--direct-owner', action='store_true', help='Check direct product-owner behavior instead of global-manager behavior')
 parser.add_argument('--worker', type=Path, required=True)
 parser.add_argument('--fixture', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
@@ -69,8 +70,9 @@ class Probe:
             closed = self.read()
         else:
             closed = self.command(bad_command if bad_command is not None else 'close')
-        expected = 5 if bad_command is not None else 0
-        assert closed == {'event': 'closed', 'cleanup': 0, 'result': expected}, closed
+        expected = (4 if args.direct_owner else 5) if bad_command is not None else 0
+        expected_closed = {'event': 'closed', 'result': expected, 'owned': False} if args.direct_owner else {'event': 'closed', 'cleanup': 0, 'result': expected}
+        assert closed == expected_closed, closed
         assert self.p.wait(timeout=10) == expected
         self.reader.join(timeout=1)
         assert not self.reader.is_alive()
@@ -94,48 +96,74 @@ def staged(name):
 
 passes = []
 active = None
+def connected(value):
+    return value['owned'] and value['result'] == 'ok' if args.direct_owner else value['connected']
+
 try:
     a = staged('normal.demo')
     active = Probe('normal', [a])
     opened = active.command('open 0')
     # Values independently taken from installed fixture header, not from the adapter.
-    assert opened['connected'] and opened['expected'] == opened['actual']
-    assert (opened['sampleRate'], opened['sampleCount'], opened['channels']) == (25_000_000, 131072, list(range(16)))
-    assert active.command('read')['connected']
+    assert connected(opened)
+    if not args.direct_owner: assert opened['expected'] == opened['actual']
+    assert (opened['sampleRate'], opened['sampleLimit' if args.direct_owner else 'sampleCount'], opened['channels']) == (25_000_000, 131072, list(range(16)))
+    assert connected(active.command('read'))
     passes.append('Live file session returns exact device and real rate/count/physical channel readback')
     reopened = active.command('open 0')
-    assert reopened['connected'] and reopened['actual'] == opened['actual'] and reopened['activations'] > opened['activations']
-    assert active.command('read previous')['reason'] == 'stale-generation'
-    passes.append('Reopen of the same native handle invalidates the prior operation generation')
+    assert connected(reopened)
+    if args.direct_owner:
+        assert reopened['generation'] > opened['generation']
+        assert active.command('read previous')['result'] == 'stale'
+    else:
+        assert reopened['actual'] == opened['actual'] and reopened['activations'] > opened['activations']
+        assert active.command('read previous')['reason'] == 'stale-generation'
+    passes.append('Reopening the same selection invalidates the prior operation generation')
     released = active.command('release')
-    assert released['api'] == 0 and released['actual'] == opened['actual'] and released['reason'] == 'not-active'
-    assert not released['connected'] and active.command('read')['reason'] == 'no-lease'
-    passes.append('Real release retains native identity but closed status and revoked lease reject reads')
+    if args.direct_owner:
+        assert not released['owned'] and active.command('read')['result'] == 'stale'
+        saved = active.command('saved')
+        assert not saved['owned'] and (saved['sampleRate'], saved['sampleLimit'], saved['channels']) == (25_000_000, 131072, list(range(16)))
+        assert saved['snapshotGeneration'] == reopened['generation'] < released['generation']
+        passes.append('Owned snapshot remains intact after native instance destruction without granting a live lease')
+    else:
+        assert released['api'] == 0 and released['actual'] == opened['actual'] and released['reason'] == 'not-active'
+        assert not released['connected'] and active.command('read')['reason'] == 'no-lease'
+    passes.append('Release revokes the lease and subsequent reads are rejected')
     active.close(); active = None
     passes.append('Close acknowledges native teardown and exits')
 
     a, b = staged('fallback-a.demo'), staged('fallback-b.demo')
     active = Probe('fallback', [a, b])
     first = active.command('open 0')
-    assert first['connected']
+    assert connected(first)
     # Move only this test-owned file after actual native registration, before open.
     b.rename(b.with_suffix('.removed'))
     failed = active.command('open 1')
-    assert failed['api'] == 0 and failed['actual'] == first['actual'] and failed['actual'] != failed['expected']
-    assert not failed['connected'] and failed['reason'] == 'wrong-device'
-    assert active.command('read')['reason'] == 'no-lease'
-    assert active.command('read previous')['reason'] == 'stale-generation'
+    if args.direct_owner:
+        assert failed['native'] != 0 and failed['result'] == 'open-failed' and not failed['owned']
+        assert failed['snapshotGeneration'] == 0 and failed['sampleRate'] == 0 and failed['channels'] == []
+        assert active.command('read')['result'] == 'stale'
+        assert active.command('read previous')['result'] == 'stale'
+    else:
+        assert failed['api'] == 0 and failed['actual'] == first['actual'] and failed['actual'] != failed['expected']
+        assert not failed['connected'] and failed['reason'] == 'wrong-device'
+        assert active.command('read')['reason'] == 'no-lease'
+        assert active.command('read previous')['reason'] == 'stale-generation'
     active.close(); active = None
-    passes.append('Actual fallback reports API success on the wrong device; neither new nor old lease is published')
+    passes.append('Failed switching preserves the original error without fallback or old lease' if args.direct_owner else 'Actual fallback reports API success on the wrong device; neither new nor old lease is published')
 
     a = staged('first-open-failure.demo')
     active = Probe('first-open-failure', [a])
     a.rename(a.with_suffix('.removed'))
     failed = active.command('open 0')
-    assert failed['api'] == 0 and failed['actual'] == failed['expected']
-    assert not failed['connected'] and failed['reason'] == 'stale-activation' and failed['activations'] == 0
+    if args.direct_owner:
+        assert failed['native'] != 0 and failed['result'] == 'open-failed' and not failed['owned']
+        assert failed['snapshotGeneration'] == 0 and failed['channels'] == []
+    else:
+        assert failed['api'] == 0 and failed['actual'] == failed['expected']
+        assert not failed['connected'] and failed['reason'] == 'stale-activation' and failed['activations'] == 0
     active.close(); active = None
-    passes.append('First-open failure can report success on the same partially opened instance; absent successful activation is rejected')
+    passes.append('First-open failure is retained and the partially initialized instance is destroyed' if args.direct_owner else 'First-open failure can report success on the same partially opened instance; absent successful activation is rejected')
 
     a = RUN / 'zero-rate.demo'
     with zipfile.ZipFile(SOURCE) as z:
@@ -147,16 +175,20 @@ try:
         z.writestr('header', header)
     active = Probe('zero-rate', [a])
     failed = active.command('open 0')
-    assert failed['api'] == 0 and not failed['connected'] and failed['reason'] == 'invalid-settings'
+    if args.direct_owner:
+        assert failed['native'] == 0 and failed['result'] == 'read-failed' and not failed['owned']
+        assert failed['snapshotGeneration'] == 0 and failed['sampleRate'] == 0 and failed['channels'] == []
+    else:
+        assert failed['api'] == 0 and not failed['connected'] and failed['reason'] == 'invalid-settings'
     active.close(); active = None
     passes.append('Exact handle and active status cannot admit invalid sample-rate readback')
 
     active = Probe('eof', [staged('eof.demo')])
-    assert active.command('open 0')['connected']
+    assert connected(active.command('open 0'))
     active.close(eof=True); active = None
     passes.append('Parent command-pipe EOF tears down the active file session')
     active = Probe('unknown-command', [staged('unknown.demo')])
-    assert active.command('open 0')['connected']
+    assert connected(active.command('open 0'))
     active.close(bad_command='capture'); active = None
     passes.append('Unsupported control command fails and tears down without starting capture')
 except BaseException:

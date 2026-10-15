@@ -56,9 +56,27 @@ close both run native cleanup and terminate the child. No capture runs here.
 
 The probe's guards reject the demonstrated cases; they do not recover the original
 open attempt's error once the global API has overwritten it with fallback success.
-The production connection boundary must retain that original result, either
-through a narrowly adapted native API or direct ownership of the selected driver
-instance. It also needs a synchronized owned snapshot: public active-info exposes
+The native [device owner](../tools/native/device-owner.h) now retains the original
+result by calling the selected instance's driver directly once. It consumes an
+unregistered inactive instance, revokes the previous generation before opening,
+and destroys a partially opened instance on failure. There is no fallback device.
+The original open result is retained separately from validation and cleanup.
+
+Readback uses that same owned instance and returns a value snapshot containing
+driver/type/mode, sample rate/limit and enabled physical channel IDs. A failed
+readback clears the output and revokes the connection. Closed snapshots remain
+historical values; their generation cannot authorize new operations. This is a
+small native component, not an App device session or an implemented USB connector.
+
+Ten direct-owner checks pass against the real saved-session driver, including
+the previously demonstrated first-open and switching failures. That probe does
+not link `lib_main.c` or initialize its manager/hotplug threads. The original nine
+global-manager checks still reproduce the old behavior separately. No hardware
+driver is substituted with a successful fake. Readback currently proves driver
+configuration metadata, not an independent read of physical hardware registers.
+
+The owner requires one native control thread and exclusive instance ownership.
+USB integration must preserve that rule with synchronized owned snapshots: public active-info exposes
 a borrowed device pointer after releasing its internal lock, and configuration
 getters use global state without the same lock. File-only probe pointer access
 must not be reused unchanged with USB hotplug.
