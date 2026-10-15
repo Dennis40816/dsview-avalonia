@@ -100,15 +100,24 @@ public sealed partial class MainWindow
     private static TextBlock Wrapped(string value, bool muted) { var block = Text(value, muted); block.TextWrapping = TextWrapping.Wrap; return block; }
     private Button CopyButton(string label, string value)
     {
-        var result = Button(label, () => { }, "flat");
+        var result = Button("", () => { }, "flat", label);
+        result.Content = ActionIcons.Create(ActionIcons.Copy);
+        result.Width = result.Height = 32; result.Padding = new(7);
+        AutomationProperties.SetName(result, label);
+        void Feedback(bool success, string message)
+        {
+            result.Content = ActionIcons.Create(success ? ActionIcons.Check : ActionIcons.Retry);
+            ToolTip.SetTip(result, label + " · " + message);
+            AutomationProperties.SetName(result, label + " · " + message);
+        }
         result.Click += async (_, _) =>
         {
             try
             {
-                if (Clipboard == null) { result.Content = "Copy unavailable"; return; }
-                await Clipboard.SetTextAsync(value); await Clipboard.FlushAsync(); result.Content = "Copied";
+                if (Clipboard == null) { Feedback(false, "Clipboard unavailable"); return; }
+                await Clipboard.SetTextAsync(value); await Clipboard.FlushAsync(); Feedback(true, "Copied");
             }
-            catch { result.Content = "Copy failed · retry"; }
+            catch { Feedback(false, "Copy failed · click to retry"); }
         };
         return result;
     }

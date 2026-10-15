@@ -43,6 +43,7 @@ public sealed class TimelineControl : Control
     public event Action<int>? EndpointRequested;
     public event Action? EditingCancelled;
     public event Action<bool>? KeyboardModeChanged;
+    public event Action<double>? ScrollRowsRequested;
     private static readonly string[] Probe = ["#505050", "#8F5202", "#CC0000", "#F57900", "#EDD400", "#73D216", "#3465A4", "#75507B"];
     public static IBrush Ink(string hex) => Brush.Parse(hex);
     private static readonly IBrush Text = Ink("#E4EAF0"), Muted = Ink("#9BAEBF"), Accent = Ink("#78D7C8"), Surface = Ink("#101820"), GridInk = Ink("#26343F");
@@ -59,7 +60,18 @@ public sealed class TimelineControl : Control
         GotFocus += (_, e) => { if (!overview && !rulerOnly && e.NavigationMethod == NavigationMethod.Tab) { model.FocusProbe(); SetKeyboardMode(true); } };
         LostFocus += (_, _) => SetKeyboardMode(false);
         PointerExited += (_, _) => { if (!down) { hoverChannel = null; InvalidateVisual(); } };
-        PointerWheelChanged += (_, e) => { if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) { model.Zoom(e.Delta.Y > 0 ? .8 : 1.25, Math.Clamp((e.GetPosition(this).X - LabelWidth) / PlotWidth, 0, 1)); e.Handled = true; } };
+        PointerWheelChanged += (_, e) =>
+        {
+            var x = e.GetPosition(this).X;
+            if (overview || model.Capture == null || x < LabelWidth || x > LabelWidth + PlotWidth || e.Delta.Y == 0) return;
+            if (e.KeyModifiers == KeyModifiers.Shift)
+            {
+                ScrollRowsRequested?.Invoke(-e.Delta.Y * RowHeight * 3); e.Handled = true; return;
+            }
+            if (e.KeyModifiers is not (KeyModifiers.None or KeyModifiers.Control)) return;
+            model.Zoom(Math.Pow(1.25, -Math.Clamp(e.Delta.Y, -5, 5)), (x - LabelWidth) / PlotWidth);
+            e.Handled = true;
+        };
     }
     private double PlotWidth => Math.Max(1, Bounds.Width - LabelWidth - 16);
     private IReadOnlyList<MarkerHandle> Handles => MarkerHandles.Layout(model.A is { } a ? X(a.Sample) : null, model.B is { } b ? X(b.Sample) : null, LabelWidth, LabelWidth + PlotWidth);
@@ -206,7 +218,11 @@ public sealed class TimelineControl : Control
             if (left < labelRight + 12) continue;
             context.DrawText(text, new(left, 13)); labelRight = left + text.Width;
         }
-        if (rulerOnly) { DrawMarker(context, model.A, "A", false); DrawMarker(context, model.B, "B", true); return; }
+        if (rulerOnly)
+        {
+            if (model.A is { } a && model.B is { } b) DrawInterval(context, a.Sample, b.Sample, 5);
+            DrawMarker(context, model.A, "A", false); DrawMarker(context, model.B, "B", true); return;
+        }
         foreach (var (decoder, index) in model.Decoders.Select((d, i) => (d, i)))
         {
             var y = index * 42;
@@ -356,8 +372,7 @@ public sealed class TimelineControl : Control
             double labelX = Math.Clamp(X(previewSample), LabelWidth, Math.Max(LabelWidth, Bounds.Width - 430));
             if (measured.Pulse is { } pulse)
             {
-                double x1 = Math.Clamp(X(pulse.Start), LabelWidth, LabelWidth + PlotWidth), x2 = Math.Clamp(X(pulse.End), LabelWidth, LabelWidth + PlotWidth);
-                context.DrawLine(new Pen(Accent, 1), new(x1, y), new(x2, y));
+                DrawInterval(context, pulse.Start, pulse.End, y + 39);
             }
             if (measured != model.PinnedMeasurement || (probe != null && model.Armed != null))
             {
@@ -369,6 +384,27 @@ public sealed class TimelineControl : Control
                 context.FillRectangle(Surface, new(labelX, y - 16, preview.Width + 8, 22));
                 context.DrawText(preview, new(labelX + 4, y - 15));
             }
+        }
+    }
+    private void DrawInterval(DrawingContext context, long first, long last, double y)
+    {
+        double left = X(Math.Min(first, last)), right = X(Math.Max(first, last));
+        if (right < LabelWidth || left > LabelWidth + PlotWidth) return;
+        double visibleLeft = Math.Max(LabelWidth, left), visibleRight = Math.Min(LabelWidth + PlotWidth, right);
+        var pen = new Pen(Accent, 1);
+        context.DrawLine(pen, new(visibleLeft, y), new(visibleRight, y));
+        if (right - left < 4) return; // A coincident pair must not suggest a nonzero interval.
+        double head = Math.Min(5, (right - left) / 3);
+        // Only real, visible endpoints receive arrowheads; clipped bounds are not endpoints.
+        if (left >= LabelWidth)
+        {
+            context.DrawLine(pen, new(left, y), new(left + head, y - 3));
+            context.DrawLine(pen, new(left, y), new(left + head, y + 3));
+        }
+        if (right <= LabelWidth + PlotWidth)
+        {
+            context.DrawLine(pen, new(right, y), new(right - head, y - 3));
+            context.DrawLine(pen, new(right, y), new(right - head, y + 3));
         }
     }
     private void DrawMarker(DrawingContext context, Endpoint? marker, string name, bool dashed)
@@ -387,13 +423,24 @@ public sealed class TimelineControl : Control
     {
         Label(context, "Group activity", 16, 2, Muted, 12);
         Label(context, "Full capture · " + TimingText.Duration(model.Capture!.SampleCount / (double)model.Capture.SampleRate), 16, 20, Muted, 11);
-        context.FillRectangle(Ink("#18242E"), new(LabelWidth, 7, PlotWidth, 33));
+        context.FillRectangle(Ink("#16222D"), new(LabelWidth, 7, PlotWidth, 31));
+        var a = LabelWidth + model.Start / model.Capture.SampleCount * PlotWidth;
+        var b = LabelWidth + model.End / model.Capture.SampleCount * PlotWidth;
+        double windowWidth = Math.Min(PlotWidth, Math.Max(2, b - a));
+        double windowLeft = Math.Min(a, LabelWidth + PlotWidth - windowWidth);
+        var window = new Rect(windowLeft, 7, windowWidth, 31);
+        context.FillRectangle(Ink("#294C59"), window);
         int bins = Math.Max(1, (int)Math.Ceiling(PlotWidth));
         if (!ReferenceEquals(overviewCapture, model.Capture) || !ReferenceEquals(overviewSignals, model.Signals) || activityBins.Length != bins)
         {
             overviewCapture = model.Capture; overviewSignals = model.Signals; activityBins = model.Capture.ActivityBins(overviewSignals, bins);
         }
-        for (int i = 0; i < activityBins.Length; i++) if (activityBins[i]) context.FillRectangle(Ink("#6B8796"), new(LabelWidth + i * PlotWidth / bins, 12, PlotWidth / bins, 13));
+        for (int i = 0; i < activityBins.Length; i++)
+            if (activityBins[i])
+            {
+                double x = LabelWidth + i * PlotWidth / bins;
+                context.FillRectangle(Ink(x >= a && x <= b ? "#B1DBD9" : "#627A8D"), new(x, 12, PlotWidth / bins, 13));
+            }
         foreach (var gap in model.Capture.Gaps)
         {
             double left = LabelWidth + Math.Clamp(gap.Start / (double)model.Capture.SampleCount, 0, 1) * PlotWidth;
@@ -406,9 +453,7 @@ public sealed class TimelineControl : Control
             double x = LabelWidth + sample / model.Capture.SampleCount * PlotWidth;
             Label(context, "!", Math.Clamp(x - 3, LabelWidth, LabelWidth + PlotWidth - 10), 24, Ink("#FF9AAA"), 12);
         }
-        var a = LabelWidth + model.Start / model.Capture.SampleCount * PlotWidth;
-        var b = LabelWidth + model.End / model.Capture.SampleCount * PlotWidth;
-        context.DrawRectangle(Ink("#284F655E"), new Pen(Accent, 1), new(a, 7, Math.Max(2, b - a), 33));
+        context.DrawRectangle(null, new Pen(Accent, 2), window);
     }
     private static FormattedText Format(string value, IBrush brush, double size, bool mono = false) => new(value, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, mono ? Mono : Ui, size, brush);
     private static void Label(DrawingContext c, string value, double x, double y, IBrush brush, double size = 13) => c.DrawText(Format(value, brush, size), new(x, y));

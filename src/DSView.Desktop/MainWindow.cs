@@ -27,7 +27,7 @@ public sealed partial class MainWindow : Window
     private readonly TextBlock aSource = Text("A", true), bSource = Text("B", true);
     private readonly TextBlock packetContext = Text("", true);
     private readonly TextBlock measurementTitle = Text("", true);
-    private readonly TextBlock guide = Text("Hover to measure · Ctrl + wheel to zoom", true);
+    private readonly TextBlock guide = Text("Wheel to zoom · Shift + wheel to scroll signals", true);
     private readonly TextBlock waveEmptyText = Text("");
     private readonly StackPanel waveEmpty = new() { Spacing = 12, Margin = new(24, 28), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
     private readonly Button waveEmptyAction, previousEdgeButton, nextEdgeButton;
@@ -87,7 +87,7 @@ public sealed partial class MainWindow : Window
         activityButton = Button("Activity", ShowActivity, "flat", "All captured channels: full-capture activity compared with the current time view"); activityButton.HorizontalAlignment = HorizontalAlignment.Left; Add(groupBar, activityButton, 0, 4);
         detailButton = Button("Packet details", Model.ToggleDetails, "flat"); Add(groupBar, detailButton, 0, 5);
         resultsButton = Button("Results", () => _ = ShowTimingResultsAsync(), "flat", "Kept timing results and notes"); Add(groupBar, resultsButton, 0, 6);
-        measureButton = Button("Measure A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Choose two edges or positions, on any channels"); Add(groupBar, measureButton, 0, 7); Add(page, Band(groupBar), 1);
+        measureButton = Button("Cursor A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Choose two edges or positions, then drag either cursor to adjust it"); Add(groupBar, measureButton, 0, 7); Add(page, Band(groupBar), 1);
         var nav = navigation;
         Add(nav, Button("←", Model.Previous, "flat", "Previous view"), 0, 0); Add(nav, Button("Fit time", Model.FitTime, "flat"), 0, 1);
         Add(nav, Button("−", () => Model.Zoom(1.5), "flat", "Zoom out"), 0, 2); Add(nav, Button("+", () => Model.Zoom(1 / 1.5), "flat", "Zoom in"), 0, 3);
@@ -101,7 +101,7 @@ public sealed partial class MainWindow : Window
         overview = new TimelineControl(Model, true); Add(page, overview, 3);
         timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
         timeline.EditingCancelled += CancelEditing;
-        timeline.KeyboardModeChanged += enabled => guide.Text = enabled ? "↑↓ signal · ←→ edge / sample · Enter select · Esc cancel" : "Hover to measure · Ctrl + wheel to zoom";
+        timeline.KeyboardModeChanged += enabled => guide.Text = enabled ? "↑↓ signal · ←→ edge / sample · Enter select · Esc cancel" : "Wheel to zoom · Shift + wheel to scroll signals";
         Model.SignalFocusRequested += channel => QueueSignalReveal([channel]);
         Model.MeasurementFocusRequested += QueueSignalReveal;
         ruler = new TimelineControl(Model, isRuler: true) { HorizontalAlignment = HorizontalAlignment.Left };
@@ -112,6 +112,8 @@ public sealed partial class MainWindow : Window
         Add(waveformGrid, ruler, 0);
         var timelineHost = new Grid(); timelineHost.Children.Add(timeline); timelineHost.Children.Add(timeline.LabelControls);
         waveScroll = new ScrollViewer { Content = timelineHost, VerticalContentAlignment = VerticalAlignment.Top, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        void ScrollRows(double delta) => waveScroll.Offset = new(0, Math.Clamp(waveScroll.Offset.Y + delta, 0, Math.Max(0, waveScroll.Extent.Height - waveScroll.Viewport.Height)));
+        timeline.ScrollRowsRequested += ScrollRows; ruler.ScrollRowsRequested += ScrollRows;
         waveScroll.ScrollChanged += (_, _) => { timeline.SetViewport(waveScroll.Offset.Y, waveScroll.Viewport.Height); UpdateMeasurementContext(); ScheduleTitleUpdate(); };
         Add(waveformGrid, waveScroll, 2);
         waveEmptyText.TextWrapping = TextWrapping.Wrap; waveEmptyText.MaxWidth = 420;

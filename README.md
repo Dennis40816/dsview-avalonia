@@ -119,16 +119,23 @@ has no packets, or the search has no matches. Filtered-out selections remain
 available in the inspector with their scope identified.
 
 Start with a Group or All signals. Hover a pulse to preview timing; click to pin
-it. Use Measure A/B to choose two references, or choose Position for sample-grid
-locations. Escape cancels a pending selection or numeric edit. Ctrl + wheel
-zooms and dragging empty waveform space pans. Select a packet for its content;
+it. Use Cursor A/B to choose two references, or choose Position for sample-grid
+locations. Escape cancels a pending selection or numeric edit. The wheel zooms
+around the pointer over the waveform or ruler, without requiring Ctrl. Shift +
+wheel scrolls signal rows; the channel-label rail also retains ordinary vertical
+scrolling. Dragging empty waveform space pans. Select a packet for its content;
 Locate source explicitly changes the time view. Fit time shows the whole recording.
 
-Measure A/B focuses the waveform: Up/Down chooses a signal, Left/Right steps
+Cursor A/B focuses the waveform: Up/Down chooses a signal, Left/Right steps
 through observed edges (one sample in Position mode), and Enter selects the
 endpoint. Outside a pending selection, Enter pins the local pulse at the keyboard
 cursor. A and B have separate ruler handles even at the same time. Numeric edits
 set a Position; invalid input leaves the committed measurement intact.
+Drag either cursor line or ruler handle to refine its position. Interval arrows
+mark visible endpoints of the pulse preview and A/B range; an offscreen endpoint
+is not replaced by an arrow at the viewport boundary. The overview distinguishes
+the current time window with a lighter surface and outline. Packet-data copying
+uses the copy icon beside the Hex heading, with a tooltip and accessible name.
 Fit frames the selected interval and any complete cycle used for local frequency.
 It preserves a Group that already contains both endpoints. Previous view
 restores the earlier viewport without clearing the measurement.
