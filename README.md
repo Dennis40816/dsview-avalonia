@@ -16,8 +16,9 @@ A runnable native Avalonia **offline workbench** is available for development.
 The default examples use bundled synthetic waveforms and precomputed protocol
 records. An optional development I²C source runs an external native decoder on
 its generated raw samples. Self-contained `.dsview2` analysis files preserve
-samples, decoded snapshots and the working view. Hardware acquisition and
-other capture formats are not connected.
+samples, decoded snapshots and the working view. An optional Windows development
+reader imports a bounded subset of DSView logic-v3 `.dsl` / `.demo` files as raw
+signals. Hardware acquisition and general capture-format support remain open.
 **License clearance is incomplete; no binary releases yet.**
 
 The workbench supports one signal Group at a time, all-channel navigation,
@@ -96,6 +97,14 @@ bundled. See the [development decoder contract](docs/NATIVE-I2C.md) for setup,
 focused process checks and limits. This is a finite I²C path, not streaming or
 general decoder support.
 
+**File → Import DSView capture** uses a separately configured native reader.
+Import runs in the background and starts with All signals and no decoded records.
+Physical channel IDs and names are retained; saved device/decoder settings are
+not applied. Escape cancels import; failure or cancellation keeps the previous
+analysis. Save creates a separate `.dsview2` analysis, leaving the source capture
+unchanged. Reopening that analysis requires neither the source file nor the
+reader. See [the capture-reader contract and limits](docs/NATIVE-DSL.md).
+
 Dense waveform regions appear as activity bands. Zoom in to resolve individual
 transitions. Picking and timing use the original samples, independently of the
 display's detail level. See [waveform rendering](docs/WAVEFORM-RENDERING.md) for
@@ -119,7 +128,8 @@ through observed edges (one sample in Position mode), and Enter selects the
 endpoint. Outside a pending selection, Enter pins the local pulse at the keyboard
 cursor. A and B have separate ruler handles even at the same time. Numeric edits
 set a Position; invalid input leaves the committed measurement intact.
-Fit frames the selected interval closely, including short pulses. Previous view
+Fit frames the selected interval and any complete cycle used for local frequency.
+It preserves a Group that already contains both endpoints. Previous view
 restores the earlier viewport without clearing the measurement.
 
 Show in the Activity panel reveals a channel without changing the time range.

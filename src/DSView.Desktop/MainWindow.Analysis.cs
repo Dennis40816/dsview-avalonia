@@ -15,7 +15,7 @@ namespace DSView.Desktop;
 
 public sealed partial class MainWindow
 {
-    private bool fileBusy, closePrompt, closeApproved;
+    private bool fileBusy, closePrompt, closeApproved, openingFile;
     private string? analysisPath, baselineState;
     private string sessionSourceName = "";
     private Capture? baselineCapture;
@@ -44,13 +44,14 @@ public sealed partial class MainWindow
     private void UpdateSourceIdentity()
     {
         status.Text = Model.Capture is { } capture ? SourceSummary(capture) : "No capture";
-        ToolTip.SetTip(status, analysisPath);
+        ToolTip.SetTip(status, analysisPath ?? importedPath);
         UpdateAnalysisTitle();
     }
-    private void UpdateAnalysisTitle() => Title = (analysisPath == null ? "DSView2 · Offline demo" : "DSView2 · " + Path.GetFileName(analysisPath)) + (HasAnalysisChanges ? " *" : "");
+    private void UpdateAnalysisTitle() => Title = "DSView2 · " + (analysisPath != null ? Path.GetFileName(analysisPath) : importedPath != null ? Path.GetFileName(importedPath) : "Offline demo") + (HasAnalysisChanges ? " *" : "");
     private void ScheduleTitleUpdate() { if (!titleUpdate.IsEnabled) titleUpdate.Start(); }
     private void SetOpening(bool opening)
     {
+        openingFile = opening;
         // Keep File/Cancel available while preventing new analysis from being replaced by an in-flight load.
         if (Content is not Grid page) return;
         foreach (var child in page.Children)
@@ -69,10 +70,11 @@ public sealed partial class MainWindow
         else
         {
             Command("Open analysis…     Ctrl+O", () => _ = OpenAnalysisAsync());
+            Command("Import DSView capture…", () => _ = ImportCaptureAsync());
             Command("Save analysis       Ctrl+S", () => _ = SaveAnalysisAsync(false), Model.Capture != null);
             Command("Save analysis as…  Ctrl+Shift+S", () => _ = SaveAnalysisAsync(true), Model.Capture != null);
             body.Children.Add(new Separator());
-            if (analysisPath == null) Command("Reload example", () => _ = LoadAsync(activeExample));
+            if (analysisPath == null && importedPath == null) Command("Reload example", () => _ = LoadAsync(activeExample));
             Command("Capture source…", ShowInfo, Model.Capture != null);
         }
         openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(reloadButton);
@@ -98,7 +100,7 @@ public sealed partial class MainWindow
                 updating = true;
                 try { Model.ApplyAnalysis(prepared); }
                 finally { updating = false; }
-                analysisPath = path; sessionSourceName = document.SourceName;
+                analysisPath = path; importedPath = null; sessionSourceName = document.SourceName;
                 renderedPacket = null; renderedIssue = null; ResetNumericErrors(); Refresh();
                 edgeChannel.SelectedItem = document.State.EdgeChannel is int id ? $"D{id}" : null;
                 baselineCapture = document.Capture; baselineState = AnalysisFile.StateKey(document.State);
@@ -137,8 +139,10 @@ public sealed partial class MainWindow
                 if (chosen == null) return false;
                 path = chosen.TryGetLocalPath() ?? throw new IOException("Choose a local destination for the analysis file.");
             }
+            if (importedPath != null && string.Equals(Path.GetFullPath(path), importedPath, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Choose a different filename for the analysis. The imported capture must be kept intact.");
             var snapshot = new AnalysisDocument(AnalysisDocument.FileFormat, AnalysisDocument.CurrentVersion,
-                analysisPath == null ? activeExample.Name : sessionSourceName, Model.Capture, CurrentAnalysisState());
+                CurrentSourceName, Model.Capture, CurrentAnalysisState());
             fileBusy = true; loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new();
             status.Text = "Saving " + Path.GetFileName(path) + "…";
             try
@@ -161,6 +165,7 @@ public sealed partial class MainWindow
         FileNotFoundException or DirectoryNotFoundException => "The file or folder is no longer available. Choose an existing location.",
         UnauthorizedAccessException => "This location cannot be accessed. Choose a folder you can read and write.",
         InvalidDataException => error.Message,
+        TimeoutException => error.Message,
         IOException => "The file could not be read or written. Check that it is available, that another app is not using it, and that there is enough free space.",
         _ => "The file operation could not finish. Try again or choose another location."
     };

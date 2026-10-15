@@ -31,6 +31,20 @@ internal static class MeasurementRecoveryChecks
             "Reveal uses the resized viewport and clamps to the actual scroll extent");
 
         var vm = new Workbench(); vm.Load(dense); vm.ShowAll();
+        var cycleView = new Workbench();
+        cycleView.Load(new Capture(1_000_000, 1000,
+            [new(0, "Data", false, []), new(1, "Clock", false, [new(10, true), new(20, false), new(500, true)]), new(8, "Control", false, [])], []));
+        cycleView.ShowAll(); cycleView.Pick(1, 15, 0); cycleView.FitMarkers();
+        check(cycleView.IsAllSignals && cycleView.A?.Sample == 10 && cycleView.B?.Sample == 20
+            && cycleView.Start <= 10 && cycleView.End >= 500 && cycleView.PinnedMeasurement?.PeriodSamples == 490,
+            "Local Fit keeps an already suitable Group and includes the complete asymmetric cycle without moving pulse markers");
+        var rawGroup = cycleView.Groups[0]; cycleView.SetGroup(rawGroup);
+        check(cycleView.Decoders.Count == 0 && rawGroup.Decoders.Contains("i2c"),
+            "A raw capture hides empty decoder rows without erasing reusable Group configuration");
+        cycleView.Load(new Capture(1_000_000, 1000, [new(1, "Finite pulse", false, [new(10, true), new(20, false)])], []));
+        cycleView.Pick(1, 15, 0); cycleView.FitMarkers();
+        check(cycleView.PinnedMeasurement?.Cycle == null && cycleView.Start == 5 && cycleView.End == 25,
+            "Incomplete-cycle Fit frames only observed pulse evidence without fabricating a period");
         int[] requested = []; vm.MeasurementFocusRequested += channels => requested = channels.ToArray();
         vm.Pick(31, 1_004_200, 0);
         check(requested.SequenceEqual(new[] { 31 }) && vm.Start == 0 && vm.End == dense.SampleCount,

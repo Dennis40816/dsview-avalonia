@@ -76,7 +76,7 @@ public sealed partial class MainWindow : Window
         Add(header, waveTab, 0, 1); Add(header, packetTab, 0, 2);
         var source = Button("", ShowInfo, "flat", "Capture source and acquisition details"); source.Content = status; source.HorizontalAlignment = HorizontalAlignment.Right; Add(header, source, 0, 3);
         issuesButton = Button("Capture issues", ShowIssues, "flat", "Diagnostics across the entire capture, independent of Group and packet search"); issuesButton.Foreground = TimelineControl.Ink("#FF9AAA"); Add(header, issuesButton, 0, 4);
-        reloadButton = Button("File ▾", ShowFiles, tip: "Open or save an analysis"); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
+        reloadButton = Button("File ▾", ShowFiles, tip: "Import a capture, or open and save an analysis"); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
         status.MaxWidth = 380; status.TextTrimming = TextTrimming.CharacterEllipsis;
         Add(page, Band(header), 0);
         var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto,Auto"), Margin = new(16, 0) };
@@ -139,7 +139,7 @@ public sealed partial class MainWindow : Window
         delta.Foreground = TimelineControl.Ink("#C9F1EA"); delta.FontFamily = new("Cascadia Mono,Consolas"); delta.FontSize = 14; delta.TextWrapping = TextWrapping.Wrap; Add(result, delta, 0, 1);
         measurementActions.Spacing = 6; measurementActions.Margin = new(8, 0, 0, 0);
         measurementActions.Children.Add(modePicker); measurementActions.Children.Add(Button("Cancel", CancelEditing, "flat"));
-        measurementActions.Children.Add(Button("Fit", Model.FitMarkers, "flat", "Fit A/B time span and reveal source rows when they fit")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat", "Clear measurement")); Add(result, measurementActions, 0, 2);
+        measurementActions.Children.Add(Button("Fit", Model.FitMarkers, "flat", "Fit current measurement evidence, including its complete cycle, and reveal source rows")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat", "Clear measurement")); Add(result, measurementActions, 0, 2);
         keepResultButton = Button("Keep result", KeepTimingResult, "flat", "Keep a copy of this measurement in the analysis"); measurementActions.Children.Add(keepResultButton);
         modePicker.SelectionChanged += (_, _) => { if (!updating) Model.SetSnapMode(modePicker.SelectedIndex == 1 ? 2 : 1); };
         foreach (var (label, box, index) in new[] { (aSource, aTime, 0), (bSource, bTime, 1) })
@@ -169,6 +169,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => { titleUpdate.Stop(); loadCancellation?.Cancel(); ++generation; };
         KeyDown += (_, e) =>
         {
+            if (openingFile) { if (e.Key == Key.Escape) { loadCancellation?.Cancel(); e.Handled = true; } return; }
             if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.O) { e.Handled = true; _ = OpenAnalysisAsync(); return; }
             if (e.Key == Key.S && (e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift)))
             { e.Handled = true; _ = SaveAnalysisAsync(e.KeyModifiers.HasFlag(KeyModifiers.Shift)); return; }
@@ -180,7 +181,8 @@ public sealed partial class MainWindow : Window
     }
     private int SelectedEdgeChannel() => edgeChannel.SelectedItem is string str && int.TryParse(str.AsSpan(1), out var id) ? id : Model.Group.Channels.FirstOrDefault();
     private void UpdateRulerWidth() => ruler.Width = Model.Signals.Count > 0 ? timeline.Bounds.Width : wavePanel.Bounds.Width;
-    private string SourceSummary(Capture capture) => $"{(analysisPath == null ? "Offline · " + activeExample.Name : "Saved analysis · " + Path.GetFileName(analysisPath))} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
+    private string CurrentSourceName => string.IsNullOrEmpty(sessionSourceName) ? activeExample.Name : sessionSourceName;
+    private string SourceSummary(Capture capture) => $"{(analysisPath != null ? "Saved analysis · " + Path.GetFileName(analysisPath) : importedPath != null ? "Imported · " + CurrentSourceName : "Offline · " + activeExample.Name)} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
     private async Task LoadAsync(DemoExample example)
     {
         if (fileBusy || !await ConfirmReplacementAsync()) return;
@@ -194,7 +196,7 @@ public sealed partial class MainWindow : Window
             if (current == generation)
             {
                 renderedPacket = null; renderedIssue = null; ResetNumericErrors();
-                RestorePersonalSettings(); analysisPath = null; sessionSourceName = "";
+                RestorePersonalSettings(); analysisPath = null; importedPath = null; sessionSourceName = example.Name;
                 Model.Load(capture); activeExample = example; waveScroll.Offset = default;
                 baselineCapture = capture; baselineState = AnalysisFile.StateKey(CurrentAnalysisState());
                 UpdateSourceIdentity();
@@ -507,7 +509,7 @@ public sealed partial class MainWindow : Window
         if (Model.Capture is not { } capture) return;
         var dialog = new Window { Title = "Capture source", Width = 540, Height = 530, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
         var body = new StackPanel { Margin = new(22), Spacing = 14 };
-        body.Children.Add(new TextBlock { Text = "Current capture · " + (analysisPath == null ? activeExample.Name : Path.GetFileName(analysisPath)), TextWrapping = TextWrapping.Wrap });
+        body.Children.Add(new TextBlock { Text = "Current capture · " + (analysisPath == null ? CurrentSourceName : Path.GetFileName(analysisPath)), TextWrapping = TextWrapping.Wrap });
         body.Children.Add(Text($"{capture.Signals.Count} channels · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}"));
         if (analysisPath != null) body.Children.Add(new TextBlock { Text = "Saved analysis · " + sessionSourceName + ". Decoded results are saved snapshots; opening does not run a decoder.", TextWrapping = TextWrapping.Wrap });
         body.Children.Add(new TextBlock { Text = capture.SourceDescription, TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
@@ -522,7 +524,7 @@ public sealed partial class MainWindow : Window
         AutomationProperties.SetName(picker, "Offline example"); body.Children.Add(picker);
         var description = new TextBlock { Text = activeExample.Description, TextWrapping = TextWrapping.Wrap }; body.Children.Add(description);
         picker.SelectionChanged += (_, _) => { if (picker.SelectedItem is DemoExample selected) description.Text = selected.Description; };
-        body.Children.Add(new TextBlock { Text = "Opening an example clears measurements, selection and search. " + (analysisPath == null ? "Your Groups and waveform colors are kept." : "Your default Groups and waveform colors will return."), TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
+        body.Children.Add(new TextBlock { Text = "Opening an example clears measurements, selection and search. " + (personalPreferences == null ? "Your Groups and waveform colors are kept." : "Your default Groups and waveform colors will return."), TextWrapping = TextWrapping.Wrap, Foreground = TimelineControl.Ink("#9BAEBF") });
         var actions = Row(); actions.Children.Add(Button("Close", dialog.Close)); actions.Children.Add(Button("Open example", async () => { var selected = picker.SelectedItem as DemoExample ?? activeExample; dialog.Close(); await LoadAsync(selected); }, "primary")); body.Children.Add(actions);
         dialog.Content = new ScrollViewer { Content = body }; await dialog.ShowDialog(this);
     }

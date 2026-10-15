@@ -14,7 +14,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 目前已有可執行的原生 Avalonia **離線工作區**，預設範例使用合成波形及預先產生的解析資料。
 選用的開發用 I²C 來源會呼叫外部 native decoder，解析其生成的原始 samples。
 可用自含 `.dsview2` 分析檔保存原始 samples、解析快照與工作狀態。
-尚未接硬體擷取及其他廠牌擷取檔格式。
+選用的 Windows 開發用 reader 已能匯入部分 DSView logic-v3 `.dsl`／`.demo` 原始訊號；硬體擷取及通用格式支援仍待完成。
 **授權清查尚未完成，目前不提供 binary 發行。**
 
 已提供一次一個 Group、全部通道、自訂波形線色、Hex 封包內容、高／低脈寬、完整局部週期／頻率，以及跨通道 A/B edge／位置量測。
@@ -73,6 +73,11 @@ Group 編輯器提供這次已擷取的訊號與來源相符的 decoder tracks�
 Worker 與 runtime 尚未隨產品提供。設定、程序檢查與限制見[開發用解析契約](docs/NATIVE-I2C.md)。
 目前僅支援有限長度的連續 I²C，不代表已支援串流或全部解析器。
 
+**File → Import DSView capture** 使用另行設定的 native reader，背景匯入後先顯示 All signals，沒有預設解析結果。
+保留實體通道編號與名稱，不套用檔案裡的裝置／decoder 設定。Esc 可取消；失敗或取消保留原分析。
+Save 另存 `.dsview2`，不修改來源擷取檔；重開分析不需要來源檔或 reader。
+支援範圍與限制見英文[擷取檔 reader 契約](docs/NATIVE-DSL.md)。
+
 密集波形先顯示活動帶，放大後可看見個別 transition。
 選點與量測始終使用原始 sample，不受顯示細節影響。
 實作方式與選用的操作次數檢查見[波形繪製](docs/WAVEFORM-RENDERING.md)。
@@ -90,7 +95,8 @@ Esc 取消選點或尚未提交的數值修改。Ctrl＋滾輪縮放，拖曳波
 Measure A/B 會將焦點移到波形：上下鍵換訊號、左右鍵逐個 observed edge 移動
 （Position 模式每次一個 sample），Enter 選點。未在選點時，Enter 固定游標處的局部脈衝量測。
 A/B 在同一時間仍有分開的時間尺把手。輸入數字會設定 Position；錯誤輸入會保留已提交的量測。
-Fit 會貼近選取區間放大，短脈衝也能看清。Previous view 回到原視野，不清除量測。
+Fit 顯示選取區間及局部頻率所依據的完整週期；目前 Group 已含兩端點時不切換 Group。
+Previous view 回到原視野，不清除量測。
 
 Activity 的 Show 顯示指定通道，不改時間範圍。
 若自訂 Group 已不包含解析器所需通道，明確定位來源／異常時會建立來源 Group。

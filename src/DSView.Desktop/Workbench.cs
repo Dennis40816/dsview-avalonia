@@ -56,6 +56,15 @@ public sealed partial class Workbench : ObservableObject
         AnalysisFile.Validate(document);
         ApplyAnalysis(PrepareValidatedAnalysis(document));
     }
+    public static AnalysisDocument CreateImportedAnalysis(DslImportResult source, ObservationGroup[] groups, Dictionary<int, string> colors,
+        CancellationToken cancellation = default)
+    {
+        var state = new AnalysisState(groups.Select(g => new ObservationGroup(g.Name, g.Channels.ToArray(), g.Decoders.ToArray())).ToArray(),
+            "All signals", new(colors), 0, source.Capture.SampleCount, null, null, 0, false, null, null, false, false, "",
+            new(null, 0), source.Capture.Signals.FirstOrDefault()?.Id) { Measurements = [] };
+        var document = new AnalysisDocument(AnalysisDocument.FileFormat, AnalysisDocument.CurrentVersion, source.SourceName, source.Capture, state);
+        AnalysisFile.Validate(document, cancellation); return document;
+    }
     internal sealed record PreparedAnalysis(AnalysisDocument Document, IReadOnlyList<CaptureIssue> Issues,
         Packet? Selected, CaptureIssue? Issue, ProtocolItem? Protocol, LocalMeasurement? Local, ObservationGroup[] Groups);
     // Used only after AnalysisFile.ReadAsync has validated the entire file on a worker.
@@ -91,7 +100,9 @@ public sealed partial class Workbench : ObservableObject
         if (ReferenceEquals(cachedCapture, Capture) && ReferenceEquals(cachedGroup, Group)) return;
         cachedCapture = Capture; cachedGroup = Group;
         cachedSignals = Capture?.Signals.Where(s => Group.Channels.Contains(s.Id)).ToArray() ?? [];
-        cachedDecoders = DSView.Domain.Capture.Decoders.Where(d => Group.Decoders.Contains(d.Id) && d.Channels.All(id => cachedSignals.Any(s => s.Id == id))).ToArray();
+        cachedDecoders = Capture?.Packets.Count > 0
+            ? DSView.Domain.Capture.Decoders.Where(d => Group.Decoders.Contains(d.Id) && d.Channels.All(id => cachedSignals.Any(s => s.Id == id))).ToArray()
+            : [];
     }
     public IReadOnlyList<Signal> Signals { get { CacheScope(); return cachedSignals; } }
     public IReadOnlyList<Decoder> Decoders { get { CacheScope(); return cachedDecoders; } }
@@ -311,8 +322,12 @@ public sealed partial class Workbench : ObservableObject
     public void FitMarkers()
     {
         if (A == null || B == null) return;
-        Remember(); Group = Groups.FirstOrDefault(g => g.Channels.Contains(A.Channel) && g.Channels.Contains(B.Channel)) ?? Groups[^1];
-        var first = Math.Min(A.Sample, B.Sample); var last = Math.Max(A.Sample, B.Sample); var pad = Math.Max(5, (last - first) * .15);
+        Remember();
+        if (!Group.Channels.Contains(A.Channel) || !Group.Channels.Contains(B.Channel))
+            Group = Groups.FirstOrDefault(g => g.Channels.Contains(A.Channel) && g.Channels.Contains(B.Channel)) ?? Groups[^1];
+        var first = Math.Min(A.Sample, B.Sample); var last = Math.Max(A.Sample, B.Sample);
+        if (PinnedMeasurement?.Cycle is { } cycle) { first = Math.Min(first, cycle.Start); last = Math.Max(last, cycle.End); }
+        var pad = Math.Max(5, (last - first) * .15);
         PacketsTab = false; SetRange(first - pad, last + pad);
         MeasurementFocusRequested?.Invoke(new[] { A.Channel, B.Channel }.Distinct().ToArray());
     }

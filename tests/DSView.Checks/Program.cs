@@ -224,5 +224,8 @@ await TimingResultChecks.RunAsync(Check, capture);
 int nativeOption = Array.IndexOf(args, "--native-i2c");
 if (nativeOption >= 0 && nativeOption + 1 >= args.Length) throw new ArgumentException("--native-i2c requires a configuration path.");
 await RawDecodeChecks.Run(Check, nativeOption < 0 ? null : args[nativeOption + 1]);
+int importOption = Array.IndexOf(args, "--native-dsl");
+if (importOption >= 0 && importOption + 1 >= args.Length) throw new ArgumentException("--native-dsl requires a configuration path.");
+await DslImportChecks.RunAsync(Check, importOption < 0 ? null : args[importOption + 1]);
 if (args.Contains("--performance")) WorkScaling.Run(Check);
 Console.WriteLine($"{passed} focused checks passed.");

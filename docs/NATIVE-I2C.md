@@ -117,7 +117,8 @@ read NACK does not. No DemoFrame or private application-layer fields are inferre
 
 This option does not provide hardware acquisition, capture-file import,
 gap-aware decoding, configurable channel roles, other decoders, application
-stacking, or persistent capture/analysis sessions. The candidate native runtime
+stacking. Capture import and saved analysis are separate workbench paths; neither
+automatically runs this decoder. The candidate native runtime
 patch has I²C-specific evidence; generic `wait`/`skip` and streaming behavior
 remain unverified. Official DSView output comparison and real-capture golden
 tests are still needed. Native UI operation, cancellation feedback and the

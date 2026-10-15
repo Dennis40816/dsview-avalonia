@@ -31,7 +31,7 @@ internal static class RawDecodeChecks
         var model = new Workbench(); model.Load(raw); model.Pick(8, 50, 10); model.StepEdge(8, 1);
         check(model.Signals.Count == 2 && model.A == null && model.Start == 0, "Absent D8 does not throw or invent a measurement in a two-signal capture");
         model.SetGroup(model.Groups[1]); model.Load(raw);
-        check(model.Signals.Count == 2 && model.Decoders.Select(d => d.Id).SequenceEqual(new[] { "i2c" }), "Source switching replaces an incompatible Group with visible source signals and available decoders");
+        check(model.Signals.Count == 2 && model.Decoders.Count == 0, "Raw source switching exposes compatible signals without claiming a decoder has produced records");
         model.SetGroup(model.Groups[1]);
         check(model.Signals.Count == 0 && model.Decoders.Count == 0, "Explicitly selecting an unavailable Group never invents decoder rows");
         var savedGroups = model.Groups.ToArray(); model.Colors[0] = "#FFFF00";
@@ -40,7 +40,7 @@ internal static class RawDecodeChecks
         var narrow = new ObservationGroup("SCL only", [0], []); model.Groups.Insert(0, narrow); model.SetGroup(narrow); model.Load(raw);
         check(ReferenceEquals(model.Group, narrow) && model.Signals.Single().Id == 0, "Source loading retains a compatible narrow Group");
         model.Pick(0, 36, 0); model.FitMarkers();
-        check(model.A?.Sample == 32 && model.B?.Sample == 40 && model.Start == 27 && model.End == 45 && model.PinnedMeasurement?.PeriodSamples == 12,
+        check(model.A?.Sample == 32 && model.B?.Sample == 40 && model.Start == 27 && model.End == 49 && model.PinnedMeasurement?.PeriodSamples == 12,
             "Fit exposes a short pulse and its adjacent cycle without a fixed 125-sample margin");
         model.Previous();
         check(model.Start == 0 && model.End == raw.SampleCount && model.A?.Sample == 32 && model.B?.Sample == 40,

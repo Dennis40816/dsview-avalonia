@@ -73,6 +73,19 @@ are hash checked before execution; dependent DLLs and Python modules still
 require a complete runtime inventory. Process separation does not establish
 license clearance. See [the development boundary](docs/NATIVE-I2C.md).
 
+The optional `NativeDslSource` adapter invokes a separate development reader
+using the pinned DSView `libsigrok4DSL` session-file/virtual-session path and its
+bundled MiniZip sources. The local experiment compiles a selected 20-file
+source/header closure with a Windows configuration header; it does not build
+the Qt UI or link a USB acquisition backend. It uses zlib 1.3.2 and the existing
+GLib/MinGW runtime; libusb 1.0.30 headers satisfy upstream includes without a
+linked libusb runtime. Worker glue, build scripts, binaries and machine-local
+configuration remain outside this repository. The executable is hash checked;
+its dependent DLLs are not all pinned by the managed adapter. The unresolved
+MiniZip provenance above still applies. See [the reader contract](docs/NATIVE-DSL.md).
+Installed DSView demonstration archives used during local validation are not
+included as public test fixtures or distribution assets.
+
 ## Before a binary release
 
 - Map actual compiled files, included headers, runtime modules, and helpers to
