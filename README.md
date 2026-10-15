@@ -19,6 +19,9 @@ its generated raw samples. Self-contained `.dsview2` analysis files preserve
 samples, decoded snapshots and the working view. An optional Windows development
 reader imports a bounded subset of DSView logic-v3 `.dsl` / `.demo` files as raw
 signals. Hardware acquisition and general capture-format support remain open.
+A development [descriptor-only USB backend](docs/DEVICE-BOUNDARY.md) can observe
+matching USB devices without opening them. Connection, capability readback and
+live acquisition are not yet implemented or exposed as App controls.
 **License clearance is incomplete; no binary releases yet.**
 
 The workbench supports one signal Group at a time, all-channel navigation,

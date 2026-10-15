@@ -40,7 +40,7 @@ location is a design decision, not evidence of implementation.
 
 | Capability | Upstream evidence | DSView2 status / gap | Intended location |
 | --- | --- | --- | --- |
-| Device enumeration, selection, hotplug | `libsigrok4DSL/lib_main.c:115,284`; `DSView/pv/toolbars/samplingbar.cpp:1142`; `pv/sigsession.cpp:2125` | Open; file-reader worker is not a USB backend | Source/device selector |
+| Device enumeration, selection, hotplug | `libsigrok4DSL/lib_main.c:115,284`; `DSView/pv/toolbars/samplingbar.cpp:1142`; `pv/sigsession.cpp:2125` | Partial descriptor-only USB backend; App device selection, connection and hotplug lifecycle remain open | Source/device selector |
 | Device capability and operating-mode selection | `pv/dialogs/deviceoptions.cpp:160,306,458` | Open; runtime capability lists required | Capture setup |
 | Sampling rate and capture duration/depth | `pv/toolbars/samplingbar.cpp:418,558` | Open; offline sample rate is metadata only | Capture setup, short summary near Start |
 | Single, repetitive and loop acquisition | `pv/toolbars/samplingbar.cpp:208`; `pv/sigsession.cpp:596,2112` | Open; modes need distinct lifecycle and cancellation tests | Capture action menu |
@@ -61,8 +61,8 @@ location is a design decision, not evidence of implementation.
 | Movable cursors, distances, sample counts | `pv/dock/measuredock.cpp:170,173,177`; `pv/view/cursor.cpp` | Partial A/B edge/position and saved results; direct-manipulation usability and multi-cursor parity open | Waveform cursors / results |
 | Rising/falling/total edge counts between cursors | `pv/dock/measuredock.cpp:172,176` | Open as a dedicated measurement; activity counts are not this feature | Measurement result options |
 | Raw pattern search, previous/next match | `pv/dialogs/search.cpp:94`; `pv/dock/searchdock.cpp:186,249` | Open; packet text search and single-edge navigation are not equivalent | Search panel |
-| Decoder catalogue, add/remove, multiple instances and stacks | `pv/dock/protocoldock.cpp:296,344,419` | Open as general integration; synthetic tracks and optional I2C source only | Decoder section in selected Group |
-| Decoder role mapping, options and bounded decode interval | `pv/dialogs/decoderoptionsdlg.cpp:94,195,527` | Open for current/imported capture | Decoder settings |
+| Decoder catalogue, add/remove, multiple instances and stacks | `pv/dock/protocoldock.cpp:296,344,419` | Partial I²C/SPI/UART instance workflow; catalogue, removal and stacks remain open | Decoder section in selected Group |
+| Decoder role mapping, options and bounded decode interval | `pv/dialogs/decoderoptionsdlg.cpp:94,195,527` | Partial full-capture I²C/SPI/UART roles/options; bounded intervals and other protocols remain open | Decoder settings |
 | Annotation rows, packet table, selection and source location | `pv/view/decodetrace.cpp`; `pv/dock/protocoldock.cpp:243` | Partial offline packet/Hex/field view; general annotation types and stack outputs open | Waveforms / Packets + inspector |
 | Protocol search and export | `pv/dock/protocoldock.cpp:837`; `pv/dialogs/protocolexp.cpp:67` | Partial search/copy; protocol CSV export open | Packet tools |
 | Native capture open/save and capture ranges | `pv/toolbars/filebar.cpp:111`; `pv/storesession.cpp:137,912` | Partial bounded logic-v3 import and separate `.dsview2` save; DSView writer/general formats open | File |

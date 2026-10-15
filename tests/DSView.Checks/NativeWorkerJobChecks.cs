@@ -19,18 +19,20 @@ internal static class NativeWorkerJobChecks
     }
     public static async Task RunAsync(Action<bool, string> check)
     {
-        foreach (string behavior in new[] { "cancel", "stdout", "stderr", "exit" })
+        foreach (var (behavior, withInput) in new[] { ("cancel", true), ("stdout", true), ("stderr", true), ("exit", true), ("cancel", false) })
         {
             using var files = new TestWorkspace(); files.Write("keep.txt", "Unrelated fixture data");
             string pipeName = "dsview2-check-" + Guid.NewGuid().ToString("N");
             using var pipe = new NamedPipeServerStream(pipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
             using var cancel = new CancellationTokenSource(); string? input = null;
-            Task<string> job = NativeWorkerJob.RunAsync([0x12, 0x34], path =>
+            ProcessStartInfo Configure(string path)
             {
-                input = path; var start = new ProcessStartInfo("dotnet");
+                if (withInput) input = path; var start = new ProcessStartInfo("dotnet");
                 foreach (string argument in new[] { typeof(NativeWorkerJobChecks).Assembly.Location, "--worker-lifetime-probe", pipeName, path, behavior }) start.ArgumentList.Add(argument);
                 return start;
-            }, cancel.Token);
+            }
+            Task<string> job = withInput ? NativeWorkerJob.RunAsync([0x12, 0x34], Configure, cancel.Token)
+                : NativeWorkerJob.RunAsync(Configure("no-generated-input"), cancel.Token);
             try
             {
                 await pipe.WaitForConnectionAsync().WaitAsync(TimeSpan.FromSeconds(15));
@@ -38,7 +40,7 @@ internal static class NativeWorkerJobChecks
                 if (behavior == "cancel")
                 {
                     using var child = Process.GetProcessById(pid);
-                    if (child.HasExited || !File.Exists(input)) throw new Exception("Cancellation must target a live child with owned input.");
+                    if (child.HasExited || withInput && !File.Exists(input)) throw new Exception("Cancellation must target a live child with owned input.");
                     cancel.Cancel();
                 }
                 bool expected = false;
@@ -47,8 +49,8 @@ internal static class NativeWorkerJobChecks
                 catch (InvalidDataException ex) when (behavior != "cancel") { expected = behavior == "exit" ? ex.Message.Contains("Controlled worker failure", StringComparison.Ordinal) : ex.Message.Contains("exceeded", StringComparison.Ordinal); }
                 bool exited;
                 try { using var child = Process.GetProcessById(pid); exited = child.HasExited; } catch (ArgumentException) { exited = true; }
-                check(expected && exited && input != null && !Directory.Exists(Path.GetDirectoryName(input)) && files.Read("keep.txt") == "Unrelated fixture data",
-                    $"Native worker {behavior}: confirms child exit, cleans owned input, preserves unrelated data and reports the original failure");
+                check(expected && exited && (!withInput || input != null && !Directory.Exists(Path.GetDirectoryName(input))) && files.Read("keep.txt") == "Unrelated fixture data",
+                    $"Native worker {behavior} (input={withInput}): confirms child exit, preserves unrelated data and cleans owned input when present");
             }
             finally { cancel.Cancel(); try { await job; } catch { } }
         }

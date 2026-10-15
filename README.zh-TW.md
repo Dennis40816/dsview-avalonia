@@ -172,3 +172,5 @@ Frontend 自有來源目錄沒有複製上游檔案。
 第三方來源保留各自授權。根目錄的 LICENSE 不會取代 DSView submodule 或其相依套件的授權。
 
 本專案與 DreamSourceLab 無隸屬或背書關係，也不是 DSView 的官方續作。
+
+開發中的 [USB 探測基礎層](docs/DEVICE-BOUNDARY.md) 可在不開啟裝置、不載入韌體的情況下讀取符合廠商的 USB 描述資訊。探測不代表已連線或可擷取；裝置連線、能力／設定回讀及 live capture 尚未接入 App。

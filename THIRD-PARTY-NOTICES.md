@@ -86,6 +86,18 @@ MiniZip provenance above still applies. See [the reader contract](docs/NATIVE-DS
 Installed DSView demonstration archives used during local validation are not
 included as public test fixtures or distribution assets.
 
+## Descriptor-only USB development worker
+
+The project-authored source `tools/native/usb-discovery.c` dynamically loads a
+separately configured libusb 1.0.30 DLL. The local package is the MSYS2 UCRT64
+`mingw-w64-ucrt-x86_64-libusb-1.0.30-1` build. The reviewed libusb header carries
+LGPL-2.1-or-later; it and the DLL retain their upstream provenance outside this
+repository. The test DLL source `tests/native/usb-discovery-fixture.c` is
+project-authored and never accesses USB. No libusb headers, DLL, firmware or
+native executable are copied into the repository. Worker and DLL hashes are
+checked at runtime. Compiler/runtime closure, corresponding-source packaging
+and notices remain part of release review. See [device boundaries](docs/DEVICE-BOUNDARY.md).
+
 ## Before a binary release
 
 - Map actual compiled files, included headers, runtime modules, and helpers to

@@ -18,6 +18,13 @@ if (args.Contains("--decoder-workflow-only"))
         await NativeDecodeWorkflowChecks.RunAsync(Check, args[captureFile + 1], args[dslConfig + 1], args[i2cConfig + 1]);
     Console.WriteLine($"{passed} decoder workflow checks passed."); return;
 }
+int usbConfig = Array.IndexOf(args, "--native-usb"), usbFixture = Array.IndexOf(args, "--usb-fixture");
+await UsbDiscoveryChecks.RunAsync(Check, usbConfig < 0 ? null : args[usbConfig + 1], usbFixture < 0 ? null : args[usbFixture + 1]);
+if (args.Contains("--usb-discovery-only"))
+{
+    await NativeWorkerJobChecks.RunAsync(Check);
+    Console.WriteLine($"{passed} USB discovery and process checks passed."); return;
+}
 await DisplayPreferencesChecks.RunAsync(Check);
 await AppearanceStorageChecks.RunAsync(Check);
 if (args.Contains("--display-preferences-only")) { Console.WriteLine($"{passed} appearance checks passed."); return; }
