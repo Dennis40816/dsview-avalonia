@@ -13,6 +13,7 @@ CursorPlacementChecks.Run(Check);
 ChannelAppearanceChecks.Run(Check);
 I2cChannelMapChecks.Run(Check);
 await DecoderSourceChecks.RunAsync(Check);
+await SerialEvidenceChecks.RunAsync(Check);
 await DecodeWorkflowChecks.RunAsync(Check);
 if (args.Contains("--cursor-placement-only")) { Console.WriteLine($"{passed} appearance and cursor placement checks passed."); return; }
 var capture = await DemoCaptureSource.LoadAsync();

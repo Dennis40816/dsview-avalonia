@@ -420,7 +420,7 @@ public sealed partial class MainWindow : Window
         var title = Text(packet.Title); title.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("HeadingFontSize")); title.FontWeight = FontWeight.SemiBold; title.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(title);
         inspector.Children.Add(Text(TimeAxis.FormatRange(packet.Span.Start, packet.Span.End, Model.Capture!.SampleRate), true));
         packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
-        inspector.Children.Add(Text(packet.Address + (packet.I2c is { AddressObserved: true } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
+        inspector.Children.Add(Text(packet.IsSerial ? packet.DataSummary : packet.Address + (packet.I2c is { AddressObserved: true } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.DataSummary));
         RenderProtocolDetails(packet);
         if (packet.Fields.Count > 0)
         {

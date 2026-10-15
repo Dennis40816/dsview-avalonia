@@ -27,7 +27,7 @@ unchanged.
 | UART | One data signal per instance | None for this module | Baud rate, data bits, parity, stop bits, bit order, inversion |
 
 Missing roles must remain absent. Do not assign an unrelated channel or synthesize
-a constant input to satisfy the current four-role SPI schema. The worker's plane
+a constant input to satisfy a legacy four-role SPI schema. The worker's plane
 order is CLK, MISO, MOSI, CS; this is transport order, not physical probe order.
 The App must keep the physical channel IDs selected by the user.
 
@@ -59,21 +59,48 @@ not prove every option combination or generic streaming support.
 These limitations are explicit unresolved intake items, not passing regressions
 that require the product to preserve incorrect behavior.
 
-## Domain and display changes required before App integration
+## Saved evidence and display preparation
 
-The current `Packet.Bytes`, nullable `int Value`, four fixed decoder slots and
-complete-role admission are insufficient for the full SPI/UART contract.
+Analysis version 5 adds typed SPI/UART snapshots and capture-specific instance
+identities. The native adapters and protocol configuration workflow remain open.
+The default SPI/UART examples retain their historical byte snapshots.
 
-- Represent a word with explicit bit width and lossless value bytes; do not
+- `SerialWord` stores a bit width, canonical uppercase fixed-width Hex and source
+  interval. SPI words use 5–128 bits; UART uses 4–128. Padding above the declared
+  width must be zero. Numeric values remain independent of wire bit order.
+- `SpiTransfer` keeps simultaneous MOSI/MISO words separate. Optional data and CS
+  roles remain absent. Completion distinguishes CS release, capture end, no CS
+  boundary and unknown. Two waveform lanes retain independent selection indices.
+- `UartFrame` distinguishes incomplete evidence from an observed stop and carries
+  nullable validity. Data alone is not a complete frame. Current options admit one
+  stop bit only, because the limitation above is unresolved.
+- Decoder sources save protocol, unique instance ID, physical roles and optional
+  typed settings. Up to 32 root instances can be stored. Parent stacks are not
+  implemented. Old fixed-slot records remain readable without invented options.
+- Version 1–4 files can be read and saved as v5. New saved source entries include
+  explicit protocol identity. Missing old options become null. Existing byte data
+  is not retroactively converted into purported native word evidence.
+- Group membership can retain absent decoder IDs across captures. Only the
+  capture's explicit sources authorize wiring or packet evidence. Missing members
+  do not create tracks or attach the demo's physical channels.
+- The contextual word inspector displays at most 32 direction/value rows per
+  page. Copy retains full Hex and direction; selecting a word connects it to its
+  decoded interval. This is not raw-edge timing evidence.
+
+New tests cover wide duplex values, 9-bit UART, options, migration, item selection,
+bounded paging, stale source rejection, optional roles and strict JSON admission.
+These are model/storage checks, not native pointer, layout or hardware acceptance.
+
+## Remaining adapter requirements
+
+- Produce words with explicit bit width and lossless values; do not
   truncate 9–128-bit values to a byte or 32-bit integer. Preserve transmission
   order separately from numeric byte order and Hex formatting.
 - Retain MOSI and MISO as separate simultaneous data directions. Do not put one
   in `Address` or concatenate them into a misleading single byte stream. Both
   directions need selectable waveform spans and independent copy actions.
-- Save the decoder instance, physical roles and options with its results.
-  Add an explicit, versioned analysis schema migration; old v1–v4 snapshots must
-  remain readable without claiming they were freshly decoded. Optional roles,
-  instance IDs and parent stack outputs need typed validation.
+- Populate the saved instance, physical roles and options from the actual job.
+  Parent stack outputs still need their own typed contract and migration.
 - Preserve native DATA/BITS/CS-CHANGE/TRANSFER and UART start/data/parity/stop/
   frame/break provenance. Decoder annotation endpoints can be estimates; they
   must not replace observed raw edges for timing measurements.
@@ -104,7 +131,7 @@ Its original bridge initialization crash was fixed by acquiring the Python GIL
 after `srd_init` releases it; it was a bridge bug, not a protocol decoder result.
 The two existing native Python deprecation warnings remain.
 
-Managed adapters, persistence migration, App configuration and rendering,
+Managed adapters, App configuration, native rendering/interaction verification,
 independent cancellation/resource bounds, runtime packaging, interoperability
 goldens, throughput, native UI operation and hardware capture remain open.
 No owner usability task is marked passed by these checks.

@@ -50,21 +50,31 @@ public sealed record Packet(string Id, string Decoder, SourceSpan Span, byte[] B
 {
     public IReadOnlyList<PacketDiagnostic> Diagnostics { get; init; } = [];
     public I2cTransfer? I2c { get; init; }
+    public SpiTransfer? Spi { get; init; }
+    public UartFrame? Uart { get; init; }
+    public bool IsSerial => Spi != null || Uart != null;
+    public bool IsI2c => Decoder == "i2c" || I2c != null;
+    public IReadOnlyList<SerialWordItem> SerialWords => Spi is { } spi
+        ? spi.Words.SelectMany((word, index) => new[] { word.Mosi == null ? null : new SerialWordItem("MOSI", index, word.Mosi), word.Miso == null ? null : new SerialWordItem("MISO", index, word.Miso) }.OfType<SerialWordItem>()).ToArray()
+        : Uart?.Data is { } data ? [new("Data", 0, data)] : [];
+    public string DataSummary => Spi is { } spi ? $"{spi.Words.Length} words · {spi.Completion switch { SpiCompletion.ChipSelectReleased => "CS released", SpiCompletion.CaptureEnded => "Capture ended", SpiCompletion.WithoutChipSelect => "No CS boundary", _ => "Completion unknown" }}" : Uart is { } uart
+        ? $"UART · {uart.Data?.BitWidth.ToString() ?? "?"} bits · {(uart.Completion == UartCompletion.Incomplete ? "Incomplete" : uart.Valid == true ? "Valid frame" : "Invalid frame")}" : $"{Bytes.Length} data bytes";
     public IReadOnlyList<I2cCell> WireCells { get; init; } = [];
     // Non-null means explicit observed protocol events; never synthesize boundaries.
     public IReadOnlyList<ProtocolAnnotation>? Annotations { get; init; }
-    public bool HasI2cCells => Decoder == "i2c" && WireCells.Count == Bytes.Length + 1
+    public bool HasI2cCells => IsI2c && WireCells.Count == Bytes.Length + 1
         && WireCells.All(c => c.Data.Start >= 0 && c.Data.Start < c.Data.End && c.Acknowledge.Start >= c.Data.End && c.Acknowledge.End > c.Acknowledge.Start)
         && WireCells.Zip(WireCells.Skip(1)).All(p => p.First.Acknowledge.End <= p.Second.Data.Start);
     public string Direction => I2c is not { AddressObserved: true } ? "?" : I2c.Read ? "R" : "W";
-    public string Hex => string.Join(" ", Bytes.Select(b => b.ToString("X2")));
+    public string Hex => IsSerial ? string.Join(" · ", SerialWords.Select(w => w.Label)) : string.Join(" ", Bytes.Select(b => b.ToString("X2")));
     public override string ToString() => $"{Id} · {Decoder.ToUpperInvariant()} · {Hex} · {Error ?? Title}";
 }
 public sealed record ProtocolItem(Packet Packet, string Label, SourceSpan Span, string Kind)
 {
+    public SerialWordItem? Serial { get; init; }
     public int? DataIndex { get; init; }
     public bool IsAddress { get; init; }
-    public string Identity => DataIndex is int index ? $"Data byte {index + 1} · {Label}" : IsAddress ? "Address · " + Label : Label;
+    public string Identity => Serial?.Identity ?? (DataIndex is int index ? $"Data byte {index + 1} · {Label}" : IsAddress ? "Address · " + Label : Label);
 }
 public sealed record Decoder(string Id, string Name, int[] Channels);
 public sealed record ObservationGroup(string Name, int[] Channels, string[] Decoders)
@@ -80,9 +90,9 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
     public DecoderSource[]? DecoderSources { get; init; }
     public IReadOnlyList<DecoderSource> EffectiveDecoderSources => DecoderSources ?? DecoderSource.LegacyDefaults();
     public IReadOnlyList<Decoder> ResolvedDecoders => EffectiveDecoderSources.Select(source =>
-        new Decoder(source.Id, Decoders.First(d => d.Id == source.Id).Name,
-            DecoderSource.LegacyDefaults().First(d => d.Id == source.Id).Inputs
-                .Select(role => source.Inputs.Single(i => i.Role == role.Role).Channel).ToArray())).ToArray();
+        new Decoder(source.Id, source.DisplayName,
+            source.RoleOrder.Where(role => source.Inputs.Any(i => i.Role == role))
+                .Select(role => source.Inputs.Single(i => i.Role == role).Channel).ToArray())).ToArray();
     // Half-open intervals where samples are absent. Silence alone is not a gap.
     public IReadOnlyList<SourceSpan> Gaps { get; init; } = [];
     public bool HasSample(long sample) => sample >= 0 && sample < SampleCount && !Gaps.Any(g => g.Start <= sample && g.End > sample);
@@ -188,6 +198,10 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
     public static readonly Decoder[] Decoders = [new("i2c", "I²C", [0, 1]), new("spi", "SPI", [2, 3, 4, 5]), new("ua", "UART TX", [6]), new("ub", "UART RX", [7])];
     public IReadOnlyList<ProtocolItem> ProtocolItems(Packet packet)
     {
+        if (packet.IsSerial)
+            return packet.SerialWords.Select(word => new ProtocolItem(packet, word.Label, word.Word.Span, "data") { Serial = word })
+                .Concat((packet.Annotations ?? []).Select(a => new ProtocolItem(packet, a.Label, a.Span, a.Kind)))
+                .OrderBy(item => item.Span.Start).ToArray();
         if (packet.Annotations is { } observed)
         {
             // Recognize the adapter's complete ordered I²C byte sequence. Labels validate
@@ -195,7 +209,7 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
             var data = observed.Where(a => a.Kind == "data").ToArray();
             bool address = packet.I2c is { AddressObserved: true };
             int prefix = address ? 1 : 0;
-            bool mapped = packet.Decoder == "i2c" && data.Length == packet.Bytes.Length + prefix
+            bool mapped = packet.IsI2c && data.Length == packet.Bytes.Length + prefix
                 && (!address || data[0].Label == packet.Address + " " + packet.Direction)
                 && packet.Bytes.Select((b, i) => data[i + prefix].Label == $"0x{b:X2}").All(match => match)
                 && data.All(a => a.Span.Start >= 0 && a.Span.Start < a.Span.End)
@@ -210,7 +224,7 @@ public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Si
             }).ToArray();
         }
         if (!packet.HasI2cCells)
-            return [new(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
+            return [new(packet, packet.IsI2c ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
         // Explicit synthetic annotations, not a live protocol decoder. Never infer bit time from sample rate.
         var result = new List<ProtocolItem> { new(packet, "START", new(packet.Span.Start, packet.Span.Start), "point") };
         string Ack(int index) => packet.I2c?.Acknowledged.ElementAtOrDefault(index) switch { true => "ACK", false => "NACK", _ => "?" };

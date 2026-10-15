@@ -24,8 +24,11 @@ signals. Hardware acquisition and general capture-format support remain open.
 The workbench supports one signal Group at a time, all-channel navigation,
 custom waveform colors, Hex packet details, local high/low pulse width and
 complete-cycle period/frequency, and cross-channel A/B edge or position timing.
-Analysis version 4 also stores capture-specific decoder channel roles; versions
-1–3 remain readable. With the optional native runtime configured, **Decoders**
+Analysis version 5 stores decoder instances, physical roles and available SPI/UART
+options, with lossless words up to 128 bits and separate SPI directions. Versions
+1–4 remain readable; absent historical settings remain unknown. These saved-data
+capabilities do not yet enable native SPI/UART decoding in the App.
+With the optional native runtime configured, **Decoders**
 in the sidebar lets you select SCL/SDA and run or cancel background I²C decoding
 of the current capture. See [native I²C setup and limits](docs/NATIVE-I2C.md).
 The time ruler stays visible while scrolling channels. A local frequency is not

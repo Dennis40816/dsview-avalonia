@@ -1,0 +1,32 @@
+<!-- SPDX-FileCopyrightText: 2026 Dennis40816; SPDX-License-Identifier: GPL-3.0-or-later -->
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:DSView.Desktop" x:Class="DSView.Desktop.SerialWordsView"
+             x:DataType="local:SerialWordsViewModel" x:CompileBindings="True">
+  <StackPanel Spacing="8">
+    <Grid ColumnDefinitions="*,Auto" IsVisible="{Binding HasWords}">
+      <TextBlock Text="Data words · Hex" VerticalAlignment="Center" Foreground="#9BAEBF" />
+      <Button x:Name="CopyData" Grid.Column="1" Classes="flat" Click="CopyWords" ToolTip.Tip="Copy data words" AutomationProperties.Name="Copy data words" Width="32" Height="32" Padding="7">
+        <Path Data="M5,5 L14,5 L14,15 L5,15 Z M2,11 L2,2 L11,2" Stroke="#C7D2DB" StrokeThickness="1.6" Stretch="Uniform" />
+      </Button>
+    </Grid>
+    <TextBlock Text="No complete data word observed." IsVisible="{Binding !HasWords}" TextWrapping="Wrap" Foreground="#9BAEBF" />
+    <ItemsControl ItemsSource="{Binding Rows}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="local:SerialWordRow">
+          <Button Classes="flat" Command="{Binding SelectCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Padding="8,6" ToolTip.Tip="Select decoded source" AutomationProperties.Name="{Binding Label}">
+            <StackPanel Spacing="4">
+              <TextBlock Text="{Binding Label}" Foreground="#9BAEBF" />
+              <TextBlock Text="{Binding Value}" TextWrapping="Wrap" FontFamily="Cascadia Mono,Consolas" FontSize="{DynamicResource DataFontSize}" />
+              <Border Height="2" Background="#78D7C8" IsVisible="{Binding Selected}" />
+            </StackPanel>
+          </Button>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <Grid ColumnDefinitions="*,Auto,Auto" IsVisible="{Binding HasPages}">
+      <TextBlock Text="{Binding Range}" VerticalAlignment="Center" Foreground="#9BAEBF" />
+      <Button Grid.Column="1" Content="‹" Classes="flat" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous words" AutomationProperties.Name="Previous words" />
+      <Button Grid.Column="2" Content="›" Classes="flat" Command="{Binding NextCommand}" ToolTip.Tip="Next words" AutomationProperties.Name="Next words" />
+    </Grid>
+  </StackPanel>
+</UserControl>

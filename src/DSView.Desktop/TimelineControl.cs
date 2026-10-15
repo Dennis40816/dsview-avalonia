@@ -102,7 +102,7 @@ public sealed class TimelineControl : Control
         else model.MoveProbe(e.Key == Key.Up ? -1 : e.Key == Key.Down ? 1 : 0, e.Key == Key.Left ? -1 : e.Key == Key.Right ? 1 : 0);
         e.Handled = true;
     }
-    private double SignalsTop => model.Decoders.Count * 42 + 28;
+    private double SignalsTop => model.DecoderLanes.Count * 42 + 28;
     private double X(double sample) => LabelWidth + (sample - model.Start) / (model.End - model.Start) * PlotWidth;
     private long Sample(double x) => (long)Math.Round(model.Start + (x - LabelWidth) / PlotWidth * (model.End - model.Start));
     private int? ChannelAt(double y)
@@ -233,18 +233,20 @@ public sealed class TimelineControl : Control
             if (model.A is { } a && model.B is { } b) DrawInterval(context, a.Sample, b.Sample, 5);
             DrawMarker(context, model.A, "A", false); DrawMarker(context, model.B, "B", true); return;
         }
-        foreach (var (decoder, index) in model.Decoders.Select((d, i) => (d, i)))
+        foreach (var (lane, index) in model.DecoderLanes.Select((d, i) => (d, i)))
         {
+            var decoder = lane.Decoder;
             var y = index * 42;
-            Label(context, decoder.Name, 16, y + 9, Text, 13);
+            using (context.PushClip(new Rect(0, y, LabelWidth - 5, 38))) Label(context, lane.Name, 16, y + 9, Text, 13);
             using (context.PushClip(new Rect(LabelWidth, y, PlotWidth, 38)))
             foreach (var packet in model.Capture.Packets.Where(p => p.Decoder == decoder.Id && p.Span.End >= model.Start && p.Span.Start <= model.End))
             {
-                var protocol = model.Capture.ProtocolItems(packet);
+                var indexed = lane.Items(model.Capture, packet);
+                var protocol = indexed.Select(p => p.Item).ToArray();
                 bool pointsOnly = packet.Annotations != null && protocol.All(item => item.Kind == "point");
-                bool detailed = pointsOnly || (packet.Annotations != null || packet.HasI2cCells) && protocol.Any(item => item.Kind == "data" && (item.Span.End - item.Span.Start) / (model.End - model.Start) * PlotWidth >= 43);
-                var items = detailed ? protocol : [new ProtocolItem(packet, packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data")];
-                foreach (var (item, itemIndex) in items.Select((item, itemIndex) => (item, itemIndex)))
+                bool detailed = pointsOnly || (packet.Annotations != null || packet.HasI2cCells || packet.IsSerial) && protocol.Any(item => item.Kind == "data" && (item.Span.End - item.Span.Start) / (model.End - model.Start) * PlotWidth >= 43);
+                var items = detailed ? indexed : new[] { (Item: new ProtocolItem(packet, packet.IsSerial ? packet.DataSummary : packet.IsI2c ? packet.Address + " " + packet.Direction + " · " + packet.Hex : packet.Hex, packet.Span, "data"), Index: -1) };
+                foreach (var (item, itemIndex) in items)
                 {
                     if (item.Span.End < model.Start || item.Span.Start > model.End) continue;
                     var left = Math.Max(LabelWidth, X(item.Span.Start)); var right = Math.Min(LabelWidth + PlotWidth, X(item.Span.End));
@@ -276,7 +278,7 @@ public sealed class TimelineControl : Control
                     }
                     if (item.Kind == "ack" && markerStyle != null) context.FillRectangle(markerStyle.Foreground, new Rect(left, y + 5, width, 2));
                     if (selectedItem && (item.Kind == "ack" || width < 10)) context.DrawRectangle(null, new Pen(item.Kind == "ack" ? Text : Accent, 1.5), rect);
-                    string label = item.Label;
+                    string label = item.Serial?.Word.Display ?? item.Label;
                     var labelInk = markerStyle?.Foreground ?? (item.Kind == "ack" ? Muted : Ink("#C9F1EA"));
                     var ft = Format(label, labelInk, item.Kind == "ack" ? 12 : 13, true);
                     if (item.Kind == "ack" && ft.Width > width - 6)
@@ -287,7 +289,7 @@ public sealed class TimelineControl : Control
                     if (ft.Width > width - 6 && detailed && item.Kind == "data" && label.StartsWith("0x", StringComparison.Ordinal))
                         ft = Format(label[2..], Ink("#C9F1EA"), 13, true);
                     if (ft.Width > width - 6 && !detailed && item.Kind == "data")
-                        ft = Format(packet.Decoder == "i2c" ? packet.Address + " " + packet.Direction : $"{packet.Bytes.Length} B", Ink("#C9F1EA"), 13, true);
+                        ft = Format(packet.IsSerial ? packet.Spi is { } spi ? $"{spi.Words.Length} words" : "Frame" : packet.IsI2c ? packet.Address + " " + packet.Direction : $"{packet.Bytes.Length} B", Ink("#C9F1EA"), 13, true);
                     if (ft.Width <= width - 6) context.DrawText(ft, new(left + (width - ft.Width) / 2, y + 5 + (26 - ft.Height) / 2));
                     hits.Add((rect, packet, detailed ? itemIndex : null));
                 }

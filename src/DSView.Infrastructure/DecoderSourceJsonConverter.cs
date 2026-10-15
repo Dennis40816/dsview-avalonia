@@ -13,7 +13,9 @@ internal sealed class DecoderSourceJsonConverter : JsonConverter<DecoderSource>
     public override DecoderSource Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
     {
         using var document = JsonDocument.ParseValue(ref reader);
-        var source = document.RootElement; RequireMembers(source, "id", "inputs");
+        var source = document.RootElement;
+        bool current = source.ValueKind == JsonValueKind.Object && source.TryGetProperty("protocol", out _);
+        RequireMembers(source, current ? ["id", "inputs", "protocol", "spi", "uart"] : ["id", "inputs"]);
         var inputs = source.GetProperty("inputs");
         if (inputs.ValueKind != JsonValueKind.Array || inputs.GetArrayLength() > 4) throw new JsonException("Invalid decoder inputs.");
         var roles = new List<DecoderInput>();
@@ -26,7 +28,15 @@ internal sealed class DecoderSourceJsonConverter : JsonConverter<DecoderSource>
             roles.Add(new(input.GetProperty("role").GetString()!, channel));
         }
         if (source.GetProperty("id").ValueKind != JsonValueKind.String) throw new JsonException("Invalid decoder identity.");
-        return new(source.GetProperty("id").GetString()!, roles.ToArray());
+        var result = new DecoderSource(source.GetProperty("id").GetString()!, roles.ToArray());
+        if (!current) return result;
+        if (source.GetProperty("protocol").ValueKind != JsonValueKind.String) throw new JsonException("Invalid protocol identity.");
+        return result with
+        {
+            Protocol = source.GetProperty("protocol").GetString(),
+            Spi = source.GetProperty("spi").Deserialize<SpiOptions>(options),
+            Uart = source.GetProperty("uart").Deserialize<UartOptions>(options)
+        };
     }
     private static void RequireMembers(JsonElement value, params string[] expected)
     {
@@ -43,6 +53,13 @@ internal sealed class DecoderSourceJsonConverter : JsonConverter<DecoderSource>
         {
             writer.WriteStartObject(); writer.WriteString("role", input.Role); writer.WriteNumber("channel", input.Channel); writer.WriteEndObject();
         }
-        writer.WriteEndArray(); writer.WriteEndObject();
+        writer.WriteEndArray();
+        if (source.Protocol != null)
+        {
+            writer.WriteString("protocol", source.Protocol);
+            writer.WritePropertyName("spi"); JsonSerializer.Serialize(writer, source.Spi, options);
+            writer.WritePropertyName("uart"); JsonSerializer.Serialize(writer, source.Uart, options);
+        }
+        writer.WriteEndObject();
     }
 }

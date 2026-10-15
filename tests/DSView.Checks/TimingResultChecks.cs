@@ -67,7 +67,7 @@ internal static class TimingResultChecks
         try
         {
             await AnalysisFile.WriteAsync(path, document); var reopened = await AnalysisFile.ReadAsync(path); var loaded = new Workbench(); loaded.RestoreAnalysis(reopened);
-            check(loaded.Measurements.SequenceEqual(model.Measurements) && reopened.Version == 4 && loaded.SelectedProtocolIndex == 9, "Version 4 round trip retains every result, note, source, kind and separate byte selection");
+            check(loaded.Measurements.SequenceEqual(model.Measurements) && reopened.Version == AnalysisDocument.CurrentVersion && loaded.SelectedProtocolIndex == 9, "Current analysis round trip retains every result, note, source, kind and separate byte selection");
             var json = JsonNode.Parse(await File.ReadAllTextAsync(path))!;
             foreach (int version in new[] { 1, 2 })
             {
@@ -76,7 +76,7 @@ internal static class TimingResultChecks
                 if (version == 1) legacy["state"]!.AsObject().Remove("selectedProtocolIndex");
                 await File.WriteAllTextAsync(path, legacy.ToJsonString()); var old = await AnalysisFile.ReadAsync(path);
                 await AnalysisFile.WriteAsync(path, old); var upgraded = await AnalysisFile.ReadAsync(path);
-                check(old.State.Measurements is { Length: 0 } && upgraded.Version == 4 && upgraded.State.Measurements is { Length: 0 }, $"Version {version} without results migrates to empty and writes complete version 4 evidence");
+                check(old.State.Measurements is { Length: 0 } && upgraded.Version == AnalysisDocument.CurrentVersion && upgraded.State.Measurements is { Length: 0 }, $"Version {version} without results migrates to empty and writes current-version evidence");
             }
             foreach (bool absent in new[] { true, false })
             {

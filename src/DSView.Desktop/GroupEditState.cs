@@ -62,9 +62,9 @@ public sealed class GroupEditState
             && g.Channels is { Length: > 0 } && g.Channels.All(c => c is >= 0 and < 32) && g.Decoders != null)
         .Select(g =>
         {
-            var decoders = Capture.Decoders.Where(d => g.Decoders.Contains(d.Id)).ToArray();
+            var decoders = g.Decoders.Where(DecoderSource.ValidId).Distinct().Take(DecoderSource.MaximumCount).ToArray();
             // Preferences are reusable memberships, not evidence of a capture's
             // decoder wiring. Do not inject the demo's D0/D1 into mapped Groups.
-            return new ObservationGroup(g.Name, g.Channels.Distinct().Order().ToArray(), decoders.Select(d => d.Id).ToArray());
+            return new ObservationGroup(g.Name, g.Channels.Distinct().Order().ToArray(), decoders);
         }).ToArray();
 }

@@ -96,6 +96,7 @@ public sealed partial class Workbench : ObservableObject
         Probe = null; Armed = null; editOrigin = null; selectingPair = draggingEndpoint = false; Hint = ""; history.Clear();
         Notify();
     }
+    private DecoderLane[] cachedLanes = [];
     private void CacheScope()
     {
         if (ReferenceEquals(cachedCapture, Capture) && ReferenceEquals(cachedGroup, Group)) return;
@@ -106,9 +107,11 @@ public sealed partial class Workbench : ObservableObject
             ? cachedSources.Where(d => (IsAllSignals || Group.Decoders.Contains(d.Id))
                 && Capture.Packets.Any(p => p.Decoder == d.Id) && d.Channels.All(id => cachedSignals.Any(s => s.Id == id))).ToArray()
             : [];
+        cachedLanes = Capture == null ? [] : DecoderLane.Create(Capture, cachedDecoders);
     }
     public IReadOnlyList<Signal> Signals { get { CacheScope(); return cachedSignals; } }
     public IReadOnlyList<Decoder> Decoders { get { CacheScope(); return cachedDecoders; } }
+    public IReadOnlyList<DecoderLane> DecoderLanes { get { CacheScope(); return cachedLanes; } }
     private IReadOnlyList<Decoder> SourceDecoders { get { CacheScope(); return cachedSources; } }
     public bool IsAllSignals => Group.Name == "All signals";
     private bool InPacketScope(Packet packet) => IsAllSignals || Group.Decoders.Contains(packet.Decoder)
@@ -164,7 +167,7 @@ public sealed partial class Workbench : ObservableObject
     public void SelectProtocol(Packet packet, int index)
     {
         if (Capture == null || !Capture.Packets.Any(p => ReferenceEquals(p, packet)) || index < 0
-            || packet.Annotations == null && !packet.HasI2cCells) return;
+            || packet.Annotations == null && !packet.HasI2cCells && !packet.IsSerial) return;
         var items = Capture.ProtocolItems(packet);
         if (index >= items.Count) return;
         Selected = packet; SelectedIssue = null; SelectedProtocolIndex = index; SelectedProtocol = items[index]; Details = true; Notify();

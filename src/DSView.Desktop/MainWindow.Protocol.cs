@@ -22,6 +22,7 @@ public sealed partial class MainWindow
     private void RenderProtocolDetails(Packet packet)
     {
         byteButtons.Clear();
+        packetContentFocus = null;
         var items = Model.Capture!.ProtocolItems(packet);
         var mapped = items.Select((item, index) => (item, index)).Where(p => p.item.DataIndex != null).ToDictionary(p => p.item.DataIndex!.Value, p => p.index);
         if (Model.SelectedProtocol is { } selected)
@@ -55,8 +56,15 @@ public sealed partial class MainWindow
                 actions.Children.Add(CopyButton("Copy byte", packet.Bytes[dataIndex].ToString("X2")));
                 bytePage = dataIndex / BytePageSize;
             }
+            if (selected.Serial is { } word) actions.Children.Add(CopyButton("Copy " + word.Direction + " word", word.Word.Hex));
             detail.Children.Add(actions);
             inspector.Children.Add(new Border { BorderBrush = TimelineControl.Ink("#78D7C8"), BorderThickness = new(2, 0, 0, 0), Padding = new(10, 2), Child = detail });
+        }
+        if (packet.IsSerial)
+        {
+            var words = new SerialWordsView { DataContext = new SerialWordsViewModel(Model, packet) };
+            inspector.Children.Add(words); packetContentFocus = words.ContentFocus;
+            return;
         }
         if (packet.Bytes.Length == 0) return;
         var header = new Grid { ColumnDefinitions = new("*,Auto") };

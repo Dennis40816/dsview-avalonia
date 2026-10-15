@@ -92,7 +92,7 @@ internal static class DecoderSourceChecks
         using var workspace = new TestWorkspace(); string path = Path.Combine(workspace.Root, "mapped.dsview2");
         var document = Document(); await AnalysisFile.WriteAsync(path, document); var loaded = await AnalysisFile.ReadAsync(path);
         var model = new Workbench(); model.RestoreAnalysis(loaded); model.Select(loaded.Capture.Packets[0]); model.Locate();
-        return loaded.Version == 4 && loaded.Capture.ResolvedDecoders.Single(d => d.Id == "i2c").Channels.SequenceEqual(new[] { 19, 3 })
+        return loaded.Version == AnalysisDocument.CurrentVersion && loaded.Capture.ResolvedDecoders.Single(d => d.Id == "i2c").Channels.SequenceEqual(new[] { 19, 3 })
             && loaded.State.A == document.State.A && loaded.State.B == document.State.B && model.Measurements.Count == 1
             && loaded.Capture.Signals.Select(s => s.Id).SequenceEqual(new[] { 0, 3, 19 }) && loaded.Capture.SourceDescription == document.Capture.SourceDescription;
     }
@@ -102,7 +102,7 @@ internal static class DecoderSourceChecks
         await AnalysisFile.WriteAsync(path, Document(false)); var json = JsonNode.Parse(workspace.Read("legacy.dsview2"))!;
         json["version"] = 3; json["capture"]!.AsObject().Remove("decoderSources"); workspace.Write("legacy.dsview2", json.ToJsonString());
         var old = await AnalysisFile.ReadAsync(path); await AnalysisFile.WriteAsync(path, old); var current = await AnalysisFile.ReadAsync(path);
-        return old.Version == 3 && old.Capture.DecoderSources == null && current.Version == 4
+        return old.Version == 3 && old.Capture.DecoderSources == null && current.Version == AnalysisDocument.CurrentVersion
             && current.Capture.DecoderSources!.Single(s => s.Id == "i2c").Inputs.Single(i => i.Role == "scl").Channel == 0
             && current.State.Measurements!.Length == 1 && current.State.A == old.State.A;
     }
