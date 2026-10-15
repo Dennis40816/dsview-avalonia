@@ -39,6 +39,7 @@ public sealed class TimelineControl : Control
     private int? hoverChannel;
     private long hoverSample;
     private IReadOnlyList<Signal>? colorSignals;
+    private readonly ChannelActivityCache channelActivity = new();
     private readonly Dictionary<int, (Button Button, Border Swatch, TextBlock Activity)> colorButtons = [];
     private Capture? overviewCapture;
     private IReadOnlyList<Signal>? overviewSignals;
@@ -112,6 +113,9 @@ public sealed class TimelineControl : Control
     }
     private void Refresh()
     {
+        // Release the previous capture even when the new source has no rows to draw.
+        if (!ReferenceEquals(traceKey.Capture, model.Capture)) { traces.Clear(); traceKey = default; }
+        if (!ReferenceEquals(overviewCapture, model.Capture)) { overviewCapture = null; overviewSignals = null; activityBins = []; }
         if (!down) hoverChannel = null;
         if (!overview && !rulerOnly)
             AutomationProperties.SetName(this, model.Probe is { } probe && keyboardMode
@@ -143,14 +147,18 @@ public sealed class TimelineControl : Control
                 Canvas.SetLeft(button, 134); LabelControls.Children.Add(button); colorButtons[channel] = (button, swatch, activity);
             }
         }
+        bool activityChanged = channelActivity.Update(model.Capture, model.Signals, model.Start, model.End);
         for (int index = 0; index < model.Signals.Count; index++)
         {
             var item = colorButtons[model.Signals[index].Id]; item.Swatch.Background = SignalColor(model.Signals[index].Id);
             Canvas.SetTop(item.Button, SignalsTop + index * RowHeight + 12);
-            var activity = model.Capture!.Activity(model.Signals[index].Id, (long)Math.Ceiling(model.Start), (long)Math.Ceiling(model.End));
-            item.Activity.Text = ActivityText.Short(activity);
-            ToolTip.SetTip(item.Activity, "Current time view · " + ActivityText.Full(activity));
-            AutomationProperties.SetName(item.Activity, $"D{model.Signals[index].Id} current view · {ActivityText.Full(activity)}");
+            if (activityChanged)
+            {
+                var activity = channelActivity.Items[index];
+                item.Activity.Text = activity.Short;
+                ToolTip.SetTip(item.Activity, "Current time view · " + activity.Full);
+                AutomationProperties.SetName(item.Activity, $"D{activity.Channel} current view · {activity.Full}");
+            }
             Canvas.SetTop(item.Activity, SignalsTop + index * RowHeight + 29);
         }
     }

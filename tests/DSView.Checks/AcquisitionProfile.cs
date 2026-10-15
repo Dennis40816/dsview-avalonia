@@ -72,6 +72,23 @@ internal static class AcquisitionProfile
             for(int i=0;i<64;i++) total+=raw.MeasureAt(i%channels,1L+i*(samples-2L)/64).WidthSamples??0;
             return total;
         },stages);
+        var activity=new ChannelActivityCache();
+        Measure("channel-labels-first",()=>activity.Update(raw,raw.Signals,0,samples),stages);
+        Measure("100-channel-label-refreshes-cached",()=>
+        {
+            for(int i=0;i<100;i++) activity.Update(raw,raw.Signals,0,samples);
+            return activity.Items.Count;
+        },stages);
+        Measure("100-channel-label-refreshes-uncached",()=>
+        {
+            int length=0;
+            for(int i=0;i<100;i++) foreach(var signal in raw.Signals)
+            {
+                var value=raw.Activity(signal.Id,0,samples);
+                length+=ActivityText.Short(value).Length+ActivityText.Full(value).Length;
+            }
+            return length;
+        },stages);
         if(repeat>0) Console.WriteLine("ACQUISITION_PROFILE "+JsonSerializer.Serialize(new {
             samples,channels,halfPeriod,edges=expected,repeat,stages,
             note="Pre-generated samples; sequential ingress/consumer to isolate CPU and allocation cost. No pacing, native callback, queue contention, GPU or UI event handlers. Allocations are per stage, not retained memory."}));

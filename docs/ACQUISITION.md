@@ -192,3 +192,13 @@ when comparing results. The diagnostic has no wall-clock pass/fail thresholds.
 Model application without UI subscribers does not measure the cost of real
 window event handlers, drawing or GPU presentation. The existing `--performance`
 checks separately assert source-access scaling for large waveform projections.
+
+The timeline already caches waveform geometry per capture, signal, time range
+and plot width. Cold projection measurements do not describe every cursor redraw.
+Channel activity labels now also reuse the current capture/group/sample-range
+result. Cursor, selection and appearance notifications neither reread edges nor
+reformat activity text when that evidence is unchanged. Source or coverage
+changes invalidate the labels, including missing-data status. The profile
+includes repeated cached/uncached label updates; native layout and drawing still
+need separate measurement. Source replacement releases old geometry references
+even when the replacement has no signal rows to draw.
