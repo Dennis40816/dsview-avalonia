@@ -27,7 +27,9 @@ complete-cycle period/frequency, and cross-channel A/B edge or position timing.
 Analysis version 5 stores decoder instances, physical roles and available SPI/UART
 options, with lossless words up to 128 bits and separate SPI directions. Versions
 1–4 remain readable; absent historical settings remain unknown. These saved-data
-capabilities do not yet enable native SPI/UART decoding in the App.
+capabilities do not yet enable native SPI/UART decoding in the App. A development
+[native serial adapter](docs/NATIVE-SERIAL.md) can run finite SPI/UART jobs
+programmatically; its settings workflow still needs App integration.
 With the optional native runtime configured, **Decoders**
 in the sidebar lets you select SCL/SDA and run or cancel background I²C decoding
 of the current capture. See [native I²C setup and limits](docs/NATIVE-I2C.md).

@@ -13,11 +13,17 @@ internal static class I2cSampleInput
         if (raw.SampleRate <= 0 || raw.SampleCount is < 10 or > 64_000_000 || raw.Gaps.Count != 0)
             throw new InvalidDataException("I²C decoding currently requires a finite, continuous capture.");
         var sources = channels.Resolve(raw);
+        return PackPlanes(raw, sources, cancellation);
+    }
+    internal static byte[] PackPlanes(Capture raw, Signal?[] sources, CancellationToken cancellation)
+    {
         int size = checked((int)((raw.SampleCount + 7) / 8));
-        var bytes = new byte[checked(size * 2)];
+        var bytes = new byte[checked(size * sources.Length)];
         for (int plane = 0; plane < sources.Length; plane++)
         {
-            var signal = sources[plane]; long previous = 0; bool high = signal.Initial;
+            cancellation.ThrowIfCancellationRequested();
+            var signal = sources[plane]; if (signal == null) continue; // Unmapped optional native plane.
+            long previous = 0; bool high = signal.Initial;
             foreach (var edge in signal.Edges)
             {
                 cancellation.ThrowIfCancellationRequested();

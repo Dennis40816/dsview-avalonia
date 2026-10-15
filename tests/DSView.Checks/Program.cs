@@ -4,6 +4,7 @@ using DSView.Desktop;
 using DSView.Domain;
 using DSView.Infrastructure;
 
+if (args.FirstOrDefault() == "--worker-lifetime-probe") { await NativeWorkerJobChecks.RunProbeAsync(args); return; }
 int passed = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); Console.WriteLine("PASS " + name); passed++; }
 await DisplayPreferencesChecks.RunAsync(Check);
@@ -14,6 +15,9 @@ ChannelAppearanceChecks.Run(Check);
 I2cChannelMapChecks.Run(Check);
 await DecoderSourceChecks.RunAsync(Check);
 await SerialEvidenceChecks.RunAsync(Check);
+await NativeWorkerJobChecks.RunAsync(Check);
+int serialOption = Array.IndexOf(args, "--native-serial"), serialFixtures = Array.IndexOf(args, "--serial-fixtures");
+await NativeSerialChecks.RunAsync(Check, serialOption < 0 ? null : args[serialOption + 1], serialFixtures < 0 ? null : args[serialFixtures + 1]);
 await DecodeWorkflowChecks.RunAsync(Check);
 if (args.Contains("--cursor-placement-only")) { Console.WriteLine($"{passed} appearance and cursor placement checks passed."); return; }
 var capture = await DemoCaptureSource.LoadAsync();

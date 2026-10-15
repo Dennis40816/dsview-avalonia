@@ -22,6 +22,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 
 選取某個 Hex byte，可在原有詳情區連結其數值、解析區間與欄位；ACK、START／STOP 各自獨立，以語意色搭配文字辨識。NACK 使用琥珀色，診斷證據使用玫紅色。
 Locate selected 定位該來源，Previous 返回前一視野，A/B 不變。分析檔 v5 保存逐項選取、多筆量測、解析實例與通道對應，支援至 128 bit 的完整 Hex、SPI 雙向資料及已有的 SPI／UART 設定。仍可讀取 v1–v4，舊檔未記錄的設定保留為未知。這些保存能力尚不代表 App 已能執行 SPI／UART native 解析。配置選用 native runtime 後，可從左側 Decoders 選擇 SCL／SDA、背景解析目前資料或取消。失敗保留舊分析；原生操作體驗仍待驗證。
+開發用 [SPI／UART native adapter](docs/NATIVE-SERIAL.md) 已可由程式呼叫，解析有限長度的原始波形；App 設定操作仍未接入。
 詳見 [協議資料選取](docs/PROTOCOL-SELECTION.md)。
 
 Activity 可比較全部已擷取通道在整段資料與目前視野的活動。

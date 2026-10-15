@@ -26,7 +26,7 @@ public sealed record SerialWord(int BitWidth, string Hex, SourceSpan Span)
 public sealed record SpiWord(SerialWord? Mosi, SerialWord? Miso);
 public enum SpiCompletion { Unknown, ChipSelectReleased, CaptureEnded, WithoutChipSelect }
 public sealed record SpiTransfer(SpiWord[] Words, SpiCompletion Completion);
-public enum UartCompletion { Incomplete, StopObserved }
+public enum UartCompletion { Incomplete, StopObserved, RejectedStart, Break }
 public sealed record UartFrame(SerialWord? Data, UartCompletion Completion, bool? Valid);
 
 // A projection for waveform selection and the word inspector; it owns no data.

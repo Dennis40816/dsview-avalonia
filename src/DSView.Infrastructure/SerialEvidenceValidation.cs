@@ -36,14 +36,18 @@ internal static class SerialEvidenceValidation
                 if (mosi && miso && pair.Mosi!.Span != pair.Miso!.Span)
                     throw new InvalidDataException("Simultaneous SPI words must share their sampled interval.");
                 var span = (pair.Mosi ?? pair.Miso)!.Span;
-                if (span.Start < previous) throw new InvalidDataException("SPI words must be ordered without overlap.");
-                previous = span.End;
+                // Native ends are estimates and may overlap when clock period changes.
+                if (span.Start <= previous) throw new InvalidDataException("SPI word starts must be strictly ordered.");
+                previous = span.Start;
             }
         }
         if (packet.Uart is { } uart)
         {
             if (source.EffectiveProtocol != "uart" || source.Uart == null || !Enum.IsDefined(uart.Completion)
-                || (uart.Completion == UartCompletion.Incomplete ? uart.Valid != null : uart.Valid == null || uart.Data == null))
+                || !(uart.Completion switch { UartCompletion.Incomplete => uart.Valid == null,
+                    UartCompletion.StopObserved => uart.Valid != null && uart.Data != null,
+                    UartCompletion.RejectedStart => uart.Valid == false && uart.Data == null,
+                    UartCompletion.Break => uart.Valid == null && uart.Data == null, _ => false }))
                 throw new InvalidDataException("UART completion, validity or options are inconsistent.");
             if (uart.Data != null) Word(uart.Data, source.Uart.DataBits);
         }

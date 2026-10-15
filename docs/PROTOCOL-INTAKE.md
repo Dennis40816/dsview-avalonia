@@ -8,8 +8,10 @@ SPDX-License-Identifier: GPL-3.0-or-later
 Current-capture native decoding is integrated for I²C. SPI and UART tracks in the
 default examples are still saved synthetic results. A local native experiment
 has exercised the pinned `1-spi` and `1-uart` modules against independent raw
-stimuli. It does not yet connect those protocols to the App, approve a runtime
-distribution, or establish live hardware performance.
+stimuli. Managed adapters now run that worker on finite raw samples and produce
+typed results. SPI/UART configuration is not yet connected to the App's Decoders
+panel. Runtime distribution and live hardware performance remain open. See
+[native serial integration](NATIVE-SERIAL.md).
 
 ## Use the existing decoder, preserve its evidence
 
@@ -62,7 +64,7 @@ that require the product to preserve incorrect behavior.
 ## Saved evidence and display preparation
 
 Analysis version 5 adds typed SPI/UART snapshots and capture-specific instance
-identities. The native adapters and protocol configuration workflow remain open.
+identities. The protocol configuration workflow remains open.
 The default SPI/UART examples retain their historical byte snapshots.
 
 - `SerialWord` stores a bit width, canonical uppercase fixed-width Hex and source
@@ -73,7 +75,9 @@ The default SPI/UART examples retain their historical byte snapshots.
   boundary and unknown. Two waveform lanes retain independent selection indices.
 - `UartFrame` distinguishes incomplete evidence from an observed stop and carries
   nullable validity. Data alone is not a complete frame. Current options admit one
-  stop bit only, because the limitation above is unresolved.
+  stop bit only, because the limitation above is unresolved. Rejected start bits
+  have no data word. Break has its own diagnostic interval and does not replace
+  the preceding invalid frame.
 - Decoder sources save protocol, unique instance ID, physical roles and optional
   typed settings. Up to 32 root instances can be stored. Parent stacks are not
   implemented. Old fixed-slot records remain readable without invented options.
@@ -91,7 +95,7 @@ New tests cover wide duplex values, 9-bit UART, options, migration, item selecti
 bounded paging, stale source rejection, optional roles and strict JSON admission.
 These are model/storage checks, not native pointer, layout or hardware acceptance.
 
-## Remaining adapter requirements
+## Adapter contract
 
 - Produce words with explicit bit width and lossless values; do not
   truncate 9–128-bit values to a byte or 32-bit integer. Preserve transmission
@@ -131,7 +135,11 @@ Its original bridge initialization crash was fixed by acquiring the Python GIL
 after `srd_init` releases it; it was a bridge bug, not a protocol decoder result.
 The two existing native Python deprecation warnings remain.
 
-Managed adapters, App configuration, native rendering/interaction verification,
-independent cancellation/resource bounds, runtime packaging, interoperability
-goldens, throughput, native UI operation and hardware capture remain open.
+Managed adapters now verify settings, event sequence, sampled bits, values and
+completion. Bounded worker jobs have checks for cancellation, output overflow,
+failed exit and startup failure cleanup. The 45-second deadline and failure to
+terminate an OS process have not been exercised by injected failure tests.
+
+App configuration, native rendering/interaction verification, runtime packaging,
+third-party interoperability goldens, throughput and hardware capture remain open.
 No owner usability task is marked passed by these checks.

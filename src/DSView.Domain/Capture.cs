@@ -58,7 +58,8 @@ public sealed record Packet(string Id, string Decoder, SourceSpan Span, byte[] B
         ? spi.Words.SelectMany((word, index) => new[] { word.Mosi == null ? null : new SerialWordItem("MOSI", index, word.Mosi), word.Miso == null ? null : new SerialWordItem("MISO", index, word.Miso) }.OfType<SerialWordItem>()).ToArray()
         : Uart?.Data is { } data ? [new("Data", 0, data)] : [];
     public string DataSummary => Spi is { } spi ? $"{spi.Words.Length} words · {spi.Completion switch { SpiCompletion.ChipSelectReleased => "CS released", SpiCompletion.CaptureEnded => "Capture ended", SpiCompletion.WithoutChipSelect => "No CS boundary", _ => "Completion unknown" }}" : Uart is { } uart
-        ? $"UART · {uart.Data?.BitWidth.ToString() ?? "?"} bits · {(uart.Completion == UartCompletion.Incomplete ? "Incomplete" : uart.Valid == true ? "Valid frame" : "Invalid frame")}" : $"{Bytes.Length} data bytes";
+        ? uart.Completion switch { UartCompletion.RejectedStart => "UART · Invalid start bit", UartCompletion.Break => "UART · Break condition",
+            _ => $"UART · {uart.Data?.BitWidth.ToString() ?? "?"} bits · {(uart.Completion == UartCompletion.Incomplete ? "Incomplete" : uart.Valid == true ? "Valid frame" : "Invalid frame")}" } : $"{Bytes.Length} data bytes";
     public IReadOnlyList<I2cCell> WireCells { get; init; } = [];
     // Non-null means explicit observed protocol events; never synthesize boundaries.
     public IReadOnlyList<ProtocolAnnotation>? Annotations { get; init; }
