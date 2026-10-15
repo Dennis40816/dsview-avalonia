@@ -31,6 +31,46 @@ These are source findings, not runtime certification of driver behavior or
 thread safety. Connection, readback, stop/disconnect and throughput still need
 integration tests and the actual device.
 
+### Verified native management failures
+
+The optional [file-session connection probe](../tests/native/CONNECTION-PROBE.md)
+now exercises the pinned management API and real saved-session driver, with an
+empty hardware driver table. It does not simulate `ds_active_device` or replace
+the session driver's open/close/configuration functions. Six child sessions pass
+nine grouped behavior checks, including these observed failure cases:
+
+| Trigger | Actual upstream result | Required behavior |
+| --- | --- | --- |
+| Open a registered file after its private test copy was moved, while another session was open | `SR_OK`, but the actual active handle belongs to the earlier session | Reject the selected connection and revoke the earlier operation generation. |
+| Move the first registered file before opening it | `SR_OK` and the expected handle with `SR_ST_ACTIVE`, but zero successful activations | Reject partial initialization; matching handle and active status are insufficient. |
+| Release a successfully opened session | `SR_OK`; active-info still contains the old handle, now `SR_ST_INACTIVE` | Revoke the lease before release; returned identity is not proof of an open connection. |
+| Open metadata with zero sample rate | Open succeeds, but configuration readback is unusable | Reject the result before defining waveform timing. |
+| Reopen the same native handle | The activation count changes | Earlier operations remain stale even when the handle value matches. |
+
+The first-open failure follows from the session driver's early assignment of
+`SR_ST_ACTIVE`, followed by the management layer retrying that same partially
+initialized instance. This is verified for the file driver, not asserted as a
+reproduced hardware failure. Normal readback independently matches the installed
+fixture header: 25 MHz, 131072 samples and physical channels 0–15. EOF and explicit
+close both run native cleanup and terminate the child. No capture runs here.
+
+The probe's guards reject the demonstrated cases; they do not recover the original
+open attempt's error once the global API has overwritten it with fallback success.
+The production connection boundary must retain that original result, either
+through a narrowly adapted native API or direct ownership of the selected driver
+instance. It also needs a synchronized owned snapshot: public active-info exposes
+a borrowed device pointer after releasing its internal lock, and configuration
+getters use global state without the same lock. File-only probe pointer access
+must not be reused unchanged with USB hotplug.
+
+Further source-only findings remain to be exercised on hardware: DSLogic scan
+accepts `SR_CONF_CONN` as a bus/address filter, but global initialization passes
+no filter; `sr_usb_find` rejects buses above 64 although descriptor bus numbers
+have a wider range. Firmware/profile detection can open the device and initiate
+firmware loading. The lower open path can retain `SR_ST_INCOMPATIBLE` for a firmware
+version mismatch. A selected-device scope, retained native identity and explicit
+firmware/re-enumeration result are therefore needed before enabling acquisition.
+
 ## Implemented descriptor-only observation
 
 `tools/native/usb-discovery.c` is a small Windows worker. It loads a reviewed
@@ -106,6 +146,9 @@ explicit connection, bind the actual device identity, verify activation readback
 then query supported mode/rate/channel/trigger combinations. Never select a
 firmware from a marketing name alone. Firmware-induced re-enumeration must
 invalidate the old handle and preserve uncertainty until identity is confirmed.
+Revoke the previous generation before attempting activation or release; a failed
+switch may leave the previous native instance open. Do not expose that fallback
+as success for either the new selection or an old, already invalidated operation.
 
 Capture configuration is separate from Group visibility. Only verified applied
 settings may define the raw sample rate and enabled channels. A data callback
