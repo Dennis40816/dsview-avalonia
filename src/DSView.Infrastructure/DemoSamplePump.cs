@@ -11,13 +11,19 @@ internal static class DemoSamplePump
         var cancellation = linked.Token;
         if (!output.Running()) return AcquisitionTermination.Failed;
         uint[] samples = new uint[output.MaximumBatchSamples]; long start = 0;
+        long began = time.GetTimestamp();
         while (start < plan.SampleLimit)
         {
             cancellation.ThrowIfCancellationRequested();
             int count = (int)Math.Min(samples.Length, plan.SampleLimit - start);
             for (int i = 0; i < count; i++) samples[i] = sampleAt(start + i);
-            // Delivery may run slower under load; timing always follows sample positions.
-            await Task.Delay(TimeSpan.FromSeconds((double)count / plan.SampleRate), time, cancellation).ConfigureAwait(false);
+            // Schedule against one monotonic origin. Per-batch delays accumulate OS timer
+            // lateness and processing time. Catch up through the same bounded queue, never
+            // by discarding samples or changing their acquisition coordinates.
+            var remaining = TimeSpan.FromSeconds((double)(start + count) / plan.SampleRate) - time.GetElapsedTime(began);
+            if (remaining > TimeSpan.Zero)
+                await Task.Delay(remaining, time, cancellation).ConfigureAwait(false);
+            cancellation.ThrowIfCancellationRequested();
             if (!await output.WaitForCapacityAsync(cancellation).ConfigureAwait(false) || !output.TryWrite(start, samples.AsSpan(0, count)))
                 return AcquisitionTermination.Overflow;
             start += count;

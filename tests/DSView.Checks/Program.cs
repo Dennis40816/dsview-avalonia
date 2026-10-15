@@ -5,6 +5,7 @@ using DSView.Domain;
 using DSView.Infrastructure;
 
 if (args.FirstOrDefault() == "--worker-lifetime-probe") { await NativeWorkerJobChecks.RunProbeAsync(args); return; }
+if (args.Contains("--acquisition-profile")) { await AcquisitionProfile.RunAsync(); return; }
 int passed = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); Console.WriteLine("PASS " + name); passed++; }
 await AcquisitionWorkflowChecks.RunAsync(Check);

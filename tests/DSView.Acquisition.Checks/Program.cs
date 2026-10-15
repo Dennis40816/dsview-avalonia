@@ -166,6 +166,22 @@ await using (var session = new AcquisitionSession(new DemoClockSource(1_000, 40,
         "Demo source provenance is explicit and no decoded content is fabricated");
 }
 var stopTime = new ControlledTime();
+var lateTime = new ControlledTime();
+await using (var session = new AcquisitionSession(new DemoClockSource(1000,28,2,0,lateTime),new(BatchSamples:7)))
+{
+    var job=session.RunAsync();
+    var first=await lateTime.NextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+    first.Fire(TimeSpan.FromMilliseconds(8)); // First delivery at 15 ms, second deadline was 14 ms.
+    var third=await lateTime.NextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));
+    Check(third.Due==TimeSpan.FromMilliseconds(6),
+        "Late Demo timer catches up a batch and schedules the third against 21 ms, without accumulating delay");
+    third.Fire();
+    var final=await lateTime.NextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));final.Fire();
+    var result=await job.WaitAsync(TimeSpan.FromSeconds(10));
+    Check(result.CanPublish && result.RetainedSamples==28 && result.RawCapture!.Signals.Single().Edges.Select(e=>e.Sample)
+        .SequenceEqual(new long[]{2,4,6,8,10,12,14,16,18,20,22,24,26}),
+        "Catching up late Demo delivery preserves every raw transition and the original sample grid");
+}
 await using (var session = new AcquisitionSession(new DemoClockSource(time: stopTime)))
 {
     var job = session.RunAsync(); var timer = await stopTime.NextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10));

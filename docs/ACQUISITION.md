@@ -76,8 +76,10 @@ incremental rendering/decoding.
 
 `DemoClockSource` generates raw clock samples for a chosen physical channel,
 sample rate/limit and integer half-period. It uses the same writer/session as
-future hardware adapters. Delivery is paced by batch duration and cancellation
-interrupts pending timers. Sub-millisecond delays may complete immediately under
+future hardware adapters. Delivery targets each batch's sample-end time relative
+to one monotonic origin. Late timers and processing time do not add a fresh full
+delay for every batch. Catch-up still passes every sample through the bounded
+queue; cancellation interrupts pending timers. Sub-millisecond delays may complete immediately under
 .NET timer resolution; sample positions and frequency always derive from the
 sample grid, never elapsed wall time. All scenarios share this small sample pump.
 
@@ -172,3 +174,21 @@ stops, unsaved-analysis decisions, file dialogs, close/cancel, large fonts and
 minimum window width. Verify cursor measurements against the selected clock and
 save/reopen the resulting analysis. Compiled bindings and view-model checks do
 not substitute for those actions in the real App.
+
+## Performance diagnostics
+
+Run `DSView.Checks --acquisition-profile` explicitly to print JSON stage timings
+and allocations for sparse/dense signals, up to 32 channels and about 1.97 million
+transitions. It measures ingress copy/conversion, immutable snapshot, validation,
+preparation, model application, overview, projections and cursor queries. Each
+case runs three times after a small warm-up. The ingress experiment consumes
+pre-generated batches sequentially to isolate processing cost; it is not a
+concurrent USB throughput measurement. Allocation counts are not retained memory.
+
+The same command runs four actual one-second paced Demo sessions. These include
+signal generation, queueing, conversion and snapshot, but exclude native decode
+and UI rendering. Record build configuration, machine load and repeat spread
+when comparing results. The diagnostic has no wall-clock pass/fail thresholds.
+Model application without UI subscribers does not measure the cost of real
+window event handlers, drawing or GPU presentation. The existing `--performance`
+checks separately assert source-access scaling for large waveform projections.
