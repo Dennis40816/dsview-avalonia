@@ -117,6 +117,10 @@ truncated/gapped input, cancellation, throughput and packaging provenance.
 Start with current-capture I2C, then SPI/UART, then dependent stacks. Source-only
 decoders remain pending until they pass these gates.
 
+The [SPI/UART intake contract](PROTOCOL-INTAKE.md) records the local raw-input
+experiment, upstream UART stop/parity limitations and required domain/UI changes.
+Those protocols are not yet connected to current-capture decoding in the App.
+
 ## Delivery order and acceptance
 
 1. Finish the owner interaction revisions: Group sidebar, concise shell,

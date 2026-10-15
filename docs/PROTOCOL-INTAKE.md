@@ -1,0 +1,110 @@
+<!--
+SPDX-FileCopyrightText: 2026 Dennis40816
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+# SPI and UART intake contract
+
+Current-capture native decoding is integrated for I²C. SPI and UART tracks in the
+default examples are still saved synthetic results. A local native experiment
+has exercised the pinned `1-spi` and `1-uart` modules against independent raw
+stimuli. It does not yet connect those protocols to the App, approve a runtime
+distribution, or establish live hardware performance.
+
+## Use the existing decoder, preserve its evidence
+
+The selected modules come from DSView revision
+`2e9e2c8e726df4ef5687d39b83d4f797cc44b574`.
+Their source headers identify GPL-2.0-or-later. This observation is not a release
+approval or a conclusion about every runtime dependency. The worker reuses the
+locally staged libsigrokdecode runtime and the previously reviewed chunk-boundary
+candidate patch; the upstream checkout and the App's existing I²C worker remain
+unchanged.
+
+| Protocol | Required source roles | Optional roles | Settings carried with results |
+| --- | --- | --- | --- |
+| SPI | CLK and at least one of MOSI/MISO | Other data direction, CS | Mode 0–3, bit order, word size, CS polarity, role presence |
+| UART | One data signal per instance | None for this module | Baud rate, data bits, parity, stop bits, bit order, inversion |
+
+Missing roles must remain absent. Do not assign an unrelated channel or synthesize
+a constant input to satisfy the current four-role SPI schema. The worker's plane
+order is CLK, MISO, MOSI, CS; this is transport order, not physical probe order.
+The App must keep the physical channel IDs selected by the user.
+
+The experiment exercised SPI modes 0–3, both bit orders, 5/8/16/128-bit words,
+active-low/high CS, each supported optional channel combination and incomplete
+words. It checked both data directions, native bit sampling positions and
+CS-bounded transfers. UART checks exercised parity variants, inversion,
+4/8/9/16/128-bit words, both bit orders, 9600/115200/921600 baud at 24 MS/s,
+parity/first-stop failure, break and truncated input. One-sample and unaligned
+chunks were compared with one-shot results for the stated fixtures. This does
+not prove every option combination or generic streaming support.
+
+## Known upstream UART limitations
+
+1. The decoder advertises several stop-bit counts, but its implementation checks
+   the first stop bit only. A raw stimulus configured for two stop bits, with a
+   valid first stop slot and a low second slot, still produces a valid first
+   frame. Do not label this as complete two-stop-bit validation. The managed
+   capability boundary must reject unsupported stop-bit validation until a
+   reviewed decoder fix has independent evidence.
+2. `PARITY ERROR` currently emits a placeholder pair `(0, 1)`. An even-parity
+   stimulus with value `0x01`, expected parity 1 and observed parity 0, reproduces
+   that incorrect pair. Retain the parity-error diagnostic and invalid-frame
+   status. Do not show the placeholder as an observed expected/actual comparison.
+3. DATA may precede FRAME, and EOF may arrive before completion. A DATA result
+   alone cannot establish a valid frame or an observed stop bit. Break also owns
+   a separate interval; it is not an ordinary successful data byte.
+
+These limitations are explicit unresolved intake items, not passing regressions
+that require the product to preserve incorrect behavior.
+
+## Domain and display changes required before App integration
+
+The current `Packet.Bytes`, nullable `int Value`, four fixed decoder slots and
+complete-role admission are insufficient for the full SPI/UART contract.
+
+- Represent a word with explicit bit width and lossless value bytes; do not
+  truncate 9–128-bit values to a byte or 32-bit integer. Preserve transmission
+  order separately from numeric byte order and Hex formatting.
+- Retain MOSI and MISO as separate simultaneous data directions. Do not put one
+  in `Address` or concatenate them into a misleading single byte stream. Both
+  directions need selectable waveform spans and independent copy actions.
+- Save the decoder instance, physical roles and options with its results.
+  Add an explicit, versioned analysis schema migration; old v1–v4 snapshots must
+  remain readable without claiming they were freshly decoded. Optional roles,
+  instance IDs and parent stack outputs need typed validation.
+- Preserve native DATA/BITS/CS-CHANGE/TRANSFER and UART start/data/parity/stop/
+  frame/break provenance. Decoder annotation endpoints can be estimates; they
+  must not replace observed raw edges for timing measurements.
+- Validate the envelope, options, event types, sequence, bit/value agreement,
+  sample bounds and completion before publication. Reject duplicate/unknown
+  fields. Keep unknown/incomplete evidence distinct from valid zero values.
+- Reuse the existing background-command lifecycle, rather than clone a separate
+  window workflow for every protocol. Protocol adapters own their contracts;
+  Workbench remains the single committed analysis owner.
+
+## Interaction direction
+
+Extend the sidebar Decoders entry. Keep the waveform as the primary surface.
+Show protocol, physical roles and the common settings first: SPI mode and UART
+baud/data/parity/stop. Less frequent word widths, bit order and inversion belong
+in the same contextual settings panel. Do not add permanent Header controls.
+
+After successful decode, an explicit action reveals the mapped source Group.
+Changing a draft must not alter saved results. Keep previous results on failed or
+cancelled jobs; label incomplete data accurately. Multiple decoder instances and
+layered parsers must retain their own configuration and result identities.
+
+## Remaining gates
+
+The local finite-input experiment passes 40 grouped behavior cases across 117
+process invocations, with the two UART limitations above recorded separately.
+Its original bridge initialization crash was fixed by acquiring the Python GIL
+after `srd_init` releases it; it was a bridge bug, not a protocol decoder result.
+The two existing native Python deprecation warnings remain.
+
+Managed adapters, persistence migration, App configuration and rendering,
+independent cancellation/resource bounds, runtime packaging, interoperability
+goldens, throughput, native UI operation and hardware capture remain open.
+No owner usability task is marked passed by these checks.
