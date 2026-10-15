@@ -212,3 +212,8 @@ capture is validated and the user-facing partial-result policy is satisfied.
 Use controlled event sequences for lifecycle failures and native/demo sources for
 packet ownership/transport checks, then real hardware for readback, trigger,
 disconnect and sustained acquisition. Keep these evidence levels separate.
+
+The managed [acquisition lifecycle](ACQUISITION.md) now implements bounded owned
+batches, prefix retention and a paced clock Demo source. Its USB source, App
+publication owner and live display integration remain pending. A native callback
+must adapt to that ownership contract; the managed tests do not certify USB timing.

@@ -1,0 +1,99 @@
+<!--
+SPDX-FileCopyrightText: 2026 Dennis40816
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+
+# Capture acquisition lifecycle
+
+`AcquisitionSession` now provides a background acquisition pipeline and a paced
+raw clock Demo source. It is not yet wired to the App's source selector or Start
+control. The native USB preparation component is also not yet an acquisition
+source. Existing offline example loading remains separate.
+
+## Source contract
+
+An `IAcquisitionSource` provides an immutable `AcquisitionPlan`: source kind/name,
+sample rate, finite sample limit and ordered physical channel IDs/names. Hardware
+adapters must construct it from verified applied configuration. Validation of a
+plan's shape is not hardware readback or capability validation.
+
+After configuration, the source calls `Running` once. It delivers packed digital
+samples, with each uint bit corresponding to its physical channel ID. Disabled
+channels must be zero. The first sample is position zero. The writer requires
+continuous positions, finite limits and valid batch lengths. Source callbacks
+call `TryWrite` before releasing borrowed native buffers; it copies the samples.
+
+The writer never waits for consumer queue capacity. Saturation returns false,
+records Overflow and seals ingress. A source must stop when the writer refuses
+data. A cooperative Demo producer can await capacity before writing. This is not
+a guarantee of lock-free or allocation-free native callback execution.
+
+The source task must return only after all its callbacks and transfers have
+ended. A data-end packet alone cannot fulfill that contract. Native worker
+adapters will need bounded stop/exit handling; the managed session cannot forcibly
+terminate a producer that ignores cancellation and refuses to return.
+
+## Ownership and completion
+
+One session owns one producer, queue and consumer. Repeated `RunAsync` calls return
+the same task. `Progress` is a polled value snapshot; it never exposes mutable
+waveform lists or raises per-sample UI notifications. Each session has a unique
+operation ID. The future App owner must match that ID before publishing results
+and await cancellation/disposal before replacing the source.
+
+| Operation or outcome | Behavior |
+| --- | --- |
+| Stop | Signal the producer, wait for its teardown, drain admitted batches and retain the actual prefix. |
+| Cancel / disposal during acquisition | Close ingress, signal abort, wait for teardown and discard the capture. A late successful source return cannot publish it. |
+| Completed | Require confirmed Running and the exact configured sample count. Premature completion becomes DataLoss. |
+| Disconnected, Overflow, DataLoss or Failed | Keep the valid prefix with its reason. Compatible partial results require explicit acceptance rather than automatic publication. |
+| Empty or fewer than ten samples | Never pad. Empty input has no capture; 1–9 samples remain available in the result but are incompatible with the current workbench/file minimum. |
+
+AcceptedSamples counts data admitted to the bounded queue. RetainedSamples counts
+the usable stored prefix, which can be smaller when transition storage overflows.
+Cancelled results retain zero samples and have no raw capture. Result captures
+contain readonly signal/edge collections, no prefilled packets and no guessed
+default decoders. Source/termination/count information is included in their
+source description. Structured acquisition metadata persistence is still pending.
+
+## Bounds and loss policy
+
+Defaults are four queued batches of 4096 uint samples (64 KiB queued payload),
+plus producer/consumer buffers and at most 2,000,000 transitions. Each plan is
+limited to 32 physical channels and 64,000,000 samples. Transition conversion
+visits changed channel bits rather than scanning every channel at each sample.
+Final snapshots temporarily coexist with the transition lists; the session then
+releases its lists. These bounds are not measured USB throughput or rendering FPS.
+
+This first pipeline retains continuous prefixes. A missing or overlapping batch
+ends the prefix; it never joins data across an unknown interval. Retaining resumed
+segments with explicit level evidence/gaps remains future work. The same applies
+to continuous/repeated acquisition, trigger metadata, disk-backed storage and
+incremental rendering/decoding.
+
+## Clock Demo and checks
+
+`DemoClockSource` generates raw clock samples for a chosen physical channel,
+sample rate/limit and integer half-period. It uses the same writer/session as
+future hardware adapters. Delivery is paced by batch duration and cancellation
+interrupts pending timers. Sub-millisecond delays may complete immediately under
+.NET timer resolution; sample positions and frequency always derive from the
+sample grid, never elapsed wall time. This is a finite clock scenario, not the
+complete I2C/SPI/UART Demo experience described in [DEMO-MODE.md](DEMO-MODE.md).
+
+The standalone checks depend only on Domain/Infrastructure, without Avalonia or
+native hardware runtimes:
+
+```powershell
+dotnet build tests/DSView.Acquisition.Checks/DSView.Acquisition.Checks.csproj --artifacts-path <output>
+dotnet <output>/bin/DSView.Acquisition.Checks/debug/DSView.Acquisition.Checks.dll
+```
+
+They cover buffer reuse before any consumer runs, batch boundary transitions,
+D0/D31 among 32 channels, queue and transition limits, malformed input, empty and
+short data, marked partial outcomes, waiting for teardown, late results after
+abort, and the real clock source with manually advanced timers. Timing assertions
+use independent sample positions; tests do not sleep for an expected duration.
+These are managed acquisition behavior checks, not App interaction or hardware
+acceptance. UI source switching/publication, protocol scenarios, saved metadata
+and live display performance still require integration evidence.

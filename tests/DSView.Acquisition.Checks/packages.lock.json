@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "dsview.domain": {
+        "type": "Project"
+      },
+      "dsview.infrastructure": {
+        "type": "Project",
+        "dependencies": {
+          "DSView.Domain": "[1.0.0, )"
+        }
+      }
+    }
+  }
+}
