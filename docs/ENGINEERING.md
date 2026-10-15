@@ -37,8 +37,8 @@ file, decoder or user-entered path chooses the appearance destination.
 
 ## Checks that protect behavior
 
-`I2cDecoderViewModel` owns the current-capture decoder workflow: role draft,
-commands, source identity, cancellation and generation. Its injected worker
+`DecoderDraft` owns role/parameter editing. `DecoderViewModel` owns the shared
+I²C/SPI/UART workflow: commands, source identity, cancellation and generation. Its injected worker
 delegate is an asynchronous IO boundary, not a second capture owner. Workbench
 alone commits validated results and preserves measurements. The window only
 opens the panel and cancels/drains work at file and shutdown boundaries. New
@@ -76,7 +76,7 @@ methods and mixed responsibilities. New appearance code does not add a
 MainWindow partial or a new save lifecycle there. Existing UI controls moved to
 the shell owner, but this is not a complete MVVM migration or repository-wide
 conformance claim. Next extractions should own a whole workflow, beginning with
-capture lifecycle and decoder configuration. Keep their behavioral evidence
+capture lifecycle. Decoder configuration now uses the shared workflow. Keep their behavioral evidence
 before changing storage or cancellation rules.
 
 The current check runner remains a console runner. The shared fixture is local

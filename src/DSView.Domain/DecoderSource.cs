@@ -13,6 +13,8 @@ public sealed record DecoderSource(string Id, DecoderInput[] Inputs)
     public string DisplayName => Capture.Decoders.FirstOrDefault(d => d.Id == Id)?.Name ?? $"{EffectiveProtocol.ToUpperInvariant()} · {Id}";
     public string[] RoleOrder => EffectiveProtocol switch { "i2c" => ["scl", "sda"], "spi" => ["clk", "mosi", "miso", "cs"], "uart" => ["data"], _ => [] };
     public DecoderSource WithExplicitProtocol() => this with { Protocol = EffectiveProtocol };
+    public bool SameConfiguration(DecoderSource other) => Id == other.Id && EffectiveProtocol == other.EffectiveProtocol
+        && Spi == other.Spi && Uart == other.Uart && Inputs.OrderBy(i => i.Role).SequenceEqual(other.Inputs.OrderBy(i => i.Role));
     public static bool ValidId(string? id) => !string.IsNullOrEmpty(id) && id.Length <= 64
         && id.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
     // Only for legacy snapshots without explicit source metadata. Never infer

@@ -95,21 +95,21 @@ stores them with the packet snapshot and restores without executing a decoder.
 The App provides a role-selection/decode workflow with job generation and
 cancellation for the current imported capture.
 
-Open **Decoders** in the Groups sidebar. The I²C panel temporarily occupies the
+Open **Decoders** in the Groups sidebar. Choose a new I²C instance or an existing instance. The panel occupies the
 packet inspector area. Choose distinct captured signals for SCL and SDA, then
 Decode. The job covers the full capture; zoom and Group membership do not trim
-its input. Existing I²C results are replaced only after success. Other protocols,
+its input. Results for that instance are replaced only after success. Other protocols,
 raw signals, view and measurements remain. Show decoded signals explicitly
 reveals the mapped source Group without silently changing the user's Group.
 
-The independent `I2cDecoderViewModel` owns role drafts, commands and job lifetime.
+The independent `DecoderViewModel` owns role drafts, commands and job lifetime.
 The compiled-binding view owns presentation. Changing source, closing the panel
 or starting a file operation cancels publication; even a late successful worker
 cannot replace a different source or a later generation. Only one job can run
 at a time. Window shutdown awaits the pending job's completion. Editing a cursor
 during a job prevents its result from publishing; finish the edit and decode again.
 Cancel and failure keep the previous committed analysis. A zero-packet success
-replaces previous I²C records with an empty result and suggests checking the roles.
+replaces that instance's previous I²C records with an empty result and suggests checking the roles.
 
 For an installed DSView logic demo with D1/SCL and D0/SDA, the opt-in checks can
 exercise import, this view model, native decode, Locate and save/reopen:
@@ -176,8 +176,9 @@ read NACK does not. No DemoFrame or private application-layer fields are inferre
 
 ## Scope still open
 
-This option does not provide hardware acquisition, gap-aware decoding, multiple
-decoder instances, other decoders or application stacking. Capture import and
+This option does not provide hardware acquisition, gap-aware decoding or
+application stacking. Multiple I²C instances use distinct saved identities.
+SPI/UART use the same workflow with a separate native adapter. Capture import and
 saved analysis are separate workbench paths; neither
 automatically runs this decoder. The candidate native runtime
 patch has I²C-specific evidence; generic `wait`/`skip` and streaming behavior

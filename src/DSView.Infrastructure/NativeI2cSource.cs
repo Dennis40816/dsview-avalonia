@@ -36,15 +36,18 @@ public static class NativeI2cSource
         var result = await DecodeMappedAsync(raw, new(0, 1), options, cancellation).ConfigureAwait(false);
         return result.ToCapture();
     }
-    public static Task<I2cDecodeResult> DecodeMappedAsync(Capture raw, I2cChannelMap channels, NativeI2cOptions options, CancellationToken cancellation = default) =>
-        Task.Run(() => DecodeCoreAsync(raw, channels, options, cancellation), cancellation);
-    private static async Task<I2cDecodeResult> DecodeCoreAsync(Capture raw, I2cChannelMap channels, NativeI2cOptions options, CancellationToken cancellation)
+    public static Task<I2cDecodeResult> DecodeMappedAsync(Capture raw, I2cChannelMap channels, NativeI2cOptions options, CancellationToken cancellation = default, string decoderId = "i2c") =>
+        Task.Run(() => DecodeCoreAsync(raw, channels, options, cancellation, decoderId), cancellation);
+    private static async Task<I2cDecodeResult> DecodeCoreAsync(Capture raw, I2cChannelMap channels, NativeI2cOptions options, CancellationToken cancellation, string decoderId)
     {
         cancellation.ThrowIfCancellationRequested();
         // The worker accepts finite continuous sources only. No gap concatenation.
         if (raw.SampleRate <= 0 || raw.SampleCount < 10 || raw.SampleCount > 64_000_000 || raw.Gaps.Count != 0)
             throw new InvalidDataException("I²C decoding currently requires a finite, continuous capture.");
         channels.Resolve(raw);
+        DecoderSource.Validate([new(decoderId, [new("scl", channels.Scl), new("sda", channels.Sda)]) { Protocol = "i2c" }]);
+        if (raw.EffectiveDecoderSources.Any(s => s.Id == decoderId && s.EffectiveProtocol != "i2c"))
+            throw new InvalidDataException("Decoder identity belongs to a different protocol.");
         ValidateOptions(options);
         var packed = I2cSampleInput.Pack(raw, channels, cancellation);
         var directory = Path.Combine(Path.GetTempPath(), "DSView2", Guid.NewGuid().ToString("N"));
@@ -73,9 +76,9 @@ public static class NativeI2cSource
                 await Task.WhenAll(output, error, process.WaitForExitAsync(timeout.Token)).ConfigureAwait(false);
                 cancellation.ThrowIfCancellationRequested();
                 if (process.ExitCode != 0) throw new InvalidDataException("I²C decoder failed. " + (await error.ConfigureAwait(false)).Trim());
-                var packets = I2cEventAdapter.ReadPackets(raw, await output.ConfigureAwait(false));
+                var packets = I2cEventAdapter.ReadPackets(raw, await output.ConfigureAwait(false), decoderId);
                 cancellation.ThrowIfCancellationRequested();
-                return new(raw, channels, packets);
+                return new(raw, channels, packets) { DecoderId = decoderId };
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             { failure = new TimeoutException("I²C decoding did not finish within the configured time limit."); throw failure; }

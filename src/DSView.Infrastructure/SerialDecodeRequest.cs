@@ -32,8 +32,9 @@ internal static class SerialDecodeRequest
         | (source.Inputs.Any(i => i.Role == "mosi") ? 2 : 0) | (source.Inputs.Any(i => i.Role == "cs") ? 4 : 0);
 }
 
-public sealed record SerialDecodeResult(Capture Source, DecoderSource Decoder, IReadOnlyList<Packet> Packets)
+public sealed record SerialDecodeResult(Capture Source, DecoderSource Decoder, IReadOnlyList<Packet> Packets) : IDecoderResult
 {
+    public DecoderSource Binding => Decoder;
     public Capture ToCapture()
     {
         SerialDecodeRequest.Resolve(Source, Decoder);

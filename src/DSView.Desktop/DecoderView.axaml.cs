@@ -5,7 +5,7 @@ using Avalonia.Markup.Xaml;
 
 namespace DSView.Desktop;
 
-internal sealed partial class I2cDecoderView : UserControl
+internal sealed partial class DecoderView : UserControl
 {
-    public I2cDecoderView() => AvaloniaXamlLoader.Load(this);
+    public DecoderView() => AvaloniaXamlLoader.Load(this);
 }

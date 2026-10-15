@@ -9,7 +9,8 @@ SPDX-License-Identifier: GPL-3.0-or-later
 raw samples. It returns source identity, instance, physical roles, settings and
 typed packets. `SerialDecodeResult.ToCapture()` replaces only that instance's
 records and preserves raw signals and source description. It does not apply a UI
-result. The current App Decoders panel still runs I²C only.
+result by itself. The App uses the [shared decoder workflow](DECODER-WORKFLOW.md)
+to configure SPI/UART and safely publish those results.
 
 The worker and runtime are separately staged development artifacts. There is no
 released serial runtime bundle or hardware-acquisition claim. See the
@@ -86,6 +87,6 @@ cancellation. They check cancellation, stdout/stderr overflow, failed exit and
 startup failure, including owned-input cleanup and unrelated-file preservation.
 The 45-second timeout and OS termination failure were not injected.
 
-App protocol settings, native controls, real capture throughput, runtime packaging
+Native control usability, real capture throughput, runtime packaging
 and owner usability remain unverified. Synthetic and programmatic checks do not
 count as owner acceptance.

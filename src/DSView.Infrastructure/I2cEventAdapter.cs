@@ -11,12 +11,12 @@ public static class I2cEventAdapter
 {
     public static Capture Apply(Capture raw, string json) => ReplacePackets(raw, ReadPackets(raw, json));
 
-    internal static Capture ReplacePackets(Capture raw, IReadOnlyList<Packet> decoded) => raw with
+    internal static Capture ReplacePackets(Capture raw, IReadOnlyList<Packet> decoded, string decoderId = "i2c") => raw with
     {
-        Packets = raw.Packets.Where(p => p.Decoder != "i2c").Concat(decoded).OrderBy(p => p.Span.Start).ToArray()
+        Packets = raw.Packets.Where(p => p.Decoder != decoderId).Concat(decoded).OrderBy(p => p.Span.Start).ToArray()
     };
 
-    internal static IReadOnlyList<Packet> ReadPackets(Capture raw, string json)
+    internal static IReadOnlyList<Packet> ReadPackets(Capture raw, string json, string decoderId = "i2c")
     {
         var output = ReadEnvelope(json);
         if (raw.SampleCount is < 10 or > 64_000_000 || raw.SampleRate <= 0 || output.Schema != 1 || output.Decoder != "1:i2c" || output.AddressFormat != "shifted" ||
@@ -24,7 +24,7 @@ public static class I2cEventAdapter
             output.Events == null || output.Events.Length > 200_000 || raw.Gaps.Count > 0)
             throw new InvalidDataException("Decoder result does not match the requested source or contract.");
         var packets = new List<Packet>();
-        var occupiedIds = raw.Packets.Where(p => p.Decoder != "i2c").Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
+        var occupiedIds = raw.Packets.Where(p => p.Decoder != decoderId).Select(p => p.Id).ToHashSet(StringComparer.Ordinal);
         int nextId = 1;
         Segment? segment = null;
         Event? pendingBits = null;
@@ -120,7 +120,7 @@ public static class I2cEventAdapter
                 diagnostics.Add(new(id + "/incomplete", "I²C", "incomplete", "Capture ended before STOP or repeated START. Only observed bytes and ACKs are shown.", [new(Math.Max(s.Start, end - 1), end)]));
             string title = s.Address == null ? "Incomplete address" : s.Read ? "Read transfer" : "Write transfer";
             if (completion == I2cCompletion.CaptureEnded && s.Address != null) title += " · incomplete";
-            packets.Add(new(id, "i2c", new(s.Start, end), s.Bytes.ToArray(), s.Address is byte addr ? $"0x{addr:X2}" : "Address unknown", title,
+            packets.Add(new(id, decoderId, new(s.Start, end), s.Bytes.ToArray(), s.Address is byte addr ? $"0x{addr:X2}" : "Address unknown", title,
                 diagnostics.FirstOrDefault()?.Message, null, [])
             {
                 I2c = new(s.Read, s.Acknowledged.ToArray()) { AddressObserved = s.Address != null, Completion = completion },

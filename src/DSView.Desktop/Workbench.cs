@@ -146,7 +146,8 @@ public sealed partial class Workbench : ObservableObject
         SetRange(0, capture.SampleCount);
     }
     public void Notify() { OnPropertyChanged(string.Empty); Changed?.Invoke(); }
-    public bool ApplyI2cResult(I2cDecodeResult result)
+    public bool ApplyI2cResult(I2cDecodeResult result) => ApplyDecoderResult(result);
+    public bool ApplyDecoderResult(IDecoderResult result)
     {
         if (!ReferenceEquals(Capture, result.Source) || HasPendingEdit) return false;
         var decoded = result.ToCapture();

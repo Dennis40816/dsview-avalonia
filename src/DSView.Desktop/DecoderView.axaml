@@ -1,0 +1,87 @@
+<!-- SPDX-FileCopyrightText: 2026 Dennis40816; SPDX-License-Identifier: GPL-3.0-or-later -->
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:DSView.Desktop" x:Class="DSView.Desktop.DecoderView"
+             x:DataType="local:DecoderViewModel" x:CompileBindings="True">
+  <UserControl.Styles>
+    <Style Selector="ComboBox">
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Background" Value="#192630" />
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+  </UserControl.Styles>
+  <Border Background="#141F29" BorderBrush="#26343F" BorderThickness="1,0,0,0">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+      <StackPanel Spacing="16" Margin="18">
+        <Grid ColumnDefinitions="*,Auto">
+          <TextBlock Text="I簡C decoder" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <Button Grid.Column="1" Classes="flat" Command="{Binding CloseCommand}" Width="32" Padding="8"
+                  ToolTip.Tip="Close and cancel pending decode" AutomationProperties.Name="Close decoder">
+            <Path Data="M3,3 L13,13 M13,3 L3,13" Width="16" Height="16" Stretch="Uniform" Stroke="#C7D2DB" StrokeThickness="1.6" />
+          </Button>
+        </Grid>
+        <StackPanel Spacing="14" IsEnabled="{Binding CanEdit}">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Instance" Foreground="#9BAEBF" />
+            <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding Target, Mode=TwoWay}" HorizontalAlignment="Stretch" AutomationProperties.Name="Decoder instance">
+              <ComboBox.ItemTemplate><DataTemplate x:DataType="local:DecoderTarget"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
+            </ComboBox>
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="Protocol" Foreground="#9BAEBF" />
+            <ComboBox ItemsSource="{Binding Draft.Protocols}" SelectedItem="{Binding Draft.Protocol, Mode=TwoWay}" IsEnabled="{Binding Draft.CanChooseProtocol}" HorizontalAlignment="Stretch" AutomationProperties.Name="Decoder protocol" />
+          </StackPanel>
+          <TextBlock Text="Saved settings are unknown. These settings apply to the next decode." IsVisible="{Binding Draft.HasUnknownSettings}" Foreground="#FFCC80" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding Draft.Roles}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="local:DecoderRoleDraft">
+                <Grid ColumnDefinitions="64,*" Margin="0,0,0,10">
+                  <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                  <ComboBox Grid.Column="1" ItemsSource="{Binding Channels}" SelectedItem="{Binding Selected, Mode=TwoWay}" PlaceholderText="Choose signal" HorizontalAlignment="Stretch" AutomationProperties.Name="{Binding Label}">
+                    <ComboBox.ItemTemplate><DataTemplate x:DataType="local:DecoderChannel"><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" /></DataTemplate></ComboBox.ItemTemplate>
+                  </ComboBox>
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Grid ColumnDefinitions="80,*" IsVisible="{Binding Draft.IsSpi}">
+            <TextBlock Text="SPI mode" VerticalAlignment="Center" />
+            <ComboBox Grid.Column="1" ItemsSource="{Binding Draft.Modes}" SelectedItem="{Binding Draft.Mode, Mode=TwoWay}" HorizontalAlignment="Stretch" AutomationProperties.Name="SPI mode" />
+          </Grid>
+          <Grid ColumnDefinitions="80,*" RowDefinitions="Auto,Auto" RowSpacing="10" IsVisible="{Binding Draft.IsUart}">
+            <TextBlock Text="Baud rate" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Draft.Baud, Mode=TwoWay}" AutomationProperties.Name="UART baud rate" />
+            <TextBlock Grid.Row="1" Text="Parity" VerticalAlignment="Center" />
+            <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Draft.Parities}" SelectedItem="{Binding Draft.Parity, Mode=TwoWay}" HorizontalAlignment="Stretch" AutomationProperties.Name="UART parity" />
+          </Grid>
+          <Grid ColumnDefinitions="80,*" IsVisible="{Binding Draft.IsSerial}">
+            <TextBlock Text="Data bits" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Draft.Bits, Mode=TwoWay}" AutomationProperties.Name="Data bits per word" />
+          </Grid>
+          <Expander Header="Advanced" IsVisible="{Binding Draft.IsSerial}" HorizontalAlignment="Stretch">
+            <StackPanel Spacing="10" Margin="0,10,0,0">
+              <TextBlock Text="Bit order" Foreground="#9BAEBF" />
+              <ComboBox ItemsSource="{Binding Draft.Orders}" SelectedItem="{Binding Draft.Order, Mode=TwoWay}" HorizontalAlignment="Stretch" AutomationProperties.Name="Bit order" />
+              <TextBlock Text="Chip select" IsVisible="{Binding Draft.IsSpi}" Foreground="#9BAEBF" />
+              <ComboBox ItemsSource="{Binding Draft.Polarities}" SelectedItem="{Binding Draft.Polarity, Mode=TwoWay}" IsVisible="{Binding Draft.IsSpi}" HorizontalAlignment="Stretch" AutomationProperties.Name="Chip select polarity" />
+              <CheckBox Content="Invert signal" IsChecked="{Binding Draft.Inverted, Mode=TwoWay}" IsVisible="{Binding Draft.IsUart}" />
+              <TextBlock Text="UART: one stop bit is supported." IsVisible="{Binding Draft.IsUart}" Foreground="#9BAEBF" TextWrapping="Wrap" />
+            </StackPanel>
+          </Expander>
+        </StackPanel>
+        <TextBlock Text="Decodes the full capture." Foreground="#9BAEBF" />
+        <TextBlock Text="{Binding Problem}" IsVisible="{Binding HasProblem}" Foreground="#FFCC80" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Content="Decode" Classes="primary" Command="{Binding DecodeCommand}" />
+          <Button Content="Cancel" Classes="flat" Command="{Binding CancelCommand}" IsVisible="{Binding IsRunning}" />
+        </StackPanel>
+        <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsRunning}" Height="2" />
+        <TextBlock Text="{Binding Status}" IsVisible="{Binding HasStatus}" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
+        <Button Content="Show decoded signals" IsVisible="{Binding HasResult}" Classes="flat" Command="{Binding ShowResultCommand}" HorizontalAlignment="Left" />
+      </StackPanel>
+    </ScrollViewer>
+  </Border>
+</UserControl>

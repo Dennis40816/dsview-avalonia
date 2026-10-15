@@ -9,8 +9,9 @@ Current-capture native decoding is integrated for I²C. SPI and UART tracks in t
 default examples are still saved synthetic results. A local native experiment
 has exercised the pinned `1-spi` and `1-uart` modules against independent raw
 stimuli. Managed adapters now run that worker on finite raw samples and produce
-typed results. SPI/UART configuration is not yet connected to the App's Decoders
-panel. Runtime distribution and live hardware performance remain open. See
+typed results. I²C/SPI/UART configuration is connected to the App's Decoders
+panel through a [shared workflow](DECODER-WORKFLOW.md); native UI acceptance is
+still pending. Runtime distribution and live hardware performance remain open. See
 [native serial integration](NATIVE-SERIAL.md).
 
 ## Use the existing decoder, preserve its evidence
@@ -140,6 +141,6 @@ completion. Bounded worker jobs have checks for cancellation, output overflow,
 failed exit and startup failure cleanup. The 45-second deadline and failure to
 terminate an OS process have not been exercised by injected failure tests.
 
-App configuration, native rendering/interaction verification, runtime packaging,
+Native rendering/interaction verification, runtime packaging,
 third-party interoperability goldens, throughput and hardware capture remain open.
 No owner usability task is marked passed by these checks.

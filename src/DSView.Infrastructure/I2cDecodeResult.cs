@@ -21,14 +21,20 @@ public sealed record I2cChannelMap(int Scl, int Sda)
 
 // Keeps physical roles and source identity with the result. This is not a saved
 // analysis: mapped results need capture-scoped tracks before UI publication.
-public sealed record I2cDecodeResult(Capture Source, I2cChannelMap Channels, IReadOnlyList<Packet> Packets)
+public sealed record I2cDecodeResult(Capture Source, I2cChannelMap Channels, IReadOnlyList<Packet> Packets) : IDecoderResult
 {
+    public string DecoderId { get; init; } = "i2c";
+    public DecoderSource Binding => new(DecoderId, [new("scl", Channels.Scl), new("sda", Channels.Sda)])
+        { Protocol = DecoderId == "i2c" ? null : "i2c" };
     public Capture ToCapture()
     {
         Channels.Resolve(Source);
-        var binding = new DecoderSource("i2c", [new("scl", Channels.Scl), new("sda", Channels.Sda)]);
-        var sources = Source.EffectiveDecoderSources.Where(s => s.Id != "i2c").Prepend(binding).ToArray();
+        var binding = Binding;
+        if (Source.EffectiveDecoderSources.Any(s => s.Id == DecoderId && s.EffectiveProtocol != "i2c"))
+            throw new InvalidDataException("Decoder identity belongs to a different protocol.");
+        var sources = Source.EffectiveDecoderSources.Where(s => s.Id != DecoderId).Prepend(binding).ToArray();
         DecoderSource.Validate(sources);
-        return I2cEventAdapter.ReplacePackets(Source, Packets) with { DecoderSources = sources };
+        if (Packets.Any(p => p.Decoder != DecoderId)) throw new InvalidDataException("I2C result contains a different instance.");
+        return I2cEventAdapter.ReplacePackets(Source, Packets, DecoderId) with { DecoderSources = sources };
     }
 }

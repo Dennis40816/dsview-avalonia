@@ -148,7 +148,7 @@ internal static class NativeSerialChecks
         }
         return new(rate, samples, signals, []) { DecoderSources = [], SourceDescription = "Independent raw stimulus replay; no hardware capture." };
     }
-    private static (Capture Raw, DecoderSource Source) SpiStimulus(bool accelerate = false)
+    internal static (Capture Raw, DecoderSource Source) SpiStimulus(bool accelerate = false)
     {
         var clk = new List<Edge>(); var mosi = new List<Edge>(); var miso = new List<Edge>(); bool tx = false, rx = false;
         for (int word = 0; word < (accelerate ? 2 : 1); word++)
@@ -163,7 +163,7 @@ internal static class NativeSerialChecks
             { DecoderSources = [], SourceDescription = "Independent sparse 9-bit SPI stimulus." },
             new("sensor", [new("clk", 19), new("mosi", 3), new("miso", 7), new("cs", 11)]) { Protocol = "spi", Spi = new(0, "msb-first", 9, "active-low") });
     }
-    private static (Capture Raw, DecoderSource Source) UartStimulus()
+    internal static (Capture Raw, DecoderSource Source) UartStimulus()
     {
         var edges = new List<Edge> { new(16, false) }; bool prior = false;
         for (int bit = 0; bit < 9; bit++)

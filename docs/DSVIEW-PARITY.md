@@ -119,7 +119,8 @@ decoders remain pending until they pass these gates.
 
 The [SPI/UART intake contract](PROTOCOL-INTAKE.md) records the local raw-input
 experiment, upstream UART stop/parity limitations and required domain/UI changes.
-Those protocols are not yet connected to current-capture decoding in the App.
+Those protocols now use the App's shared current-capture decoder workflow.
+Native controls, usability, real acquisition and throughput still need validation.
 
 ## Delivery order and acceptance
 

@@ -23,8 +23,8 @@ public sealed partial class MainWindow : Window
     public Workbench Model { get; } = new();
     // New feature owners are UI-thread confined; legacy window state is tracked separately.
     private readonly WorkbenchShell _shell;
-    private readonly I2cDecoderViewModel _decoder;
-    private readonly I2cDecoderView _decoderView;
+    private readonly DecoderViewModel _decoder;
+    private readonly DecoderView _decoderView;
     private readonly SettingsView _settingsView = new(new LocalAppearanceStore()) { IsVisible = false };
     private readonly ComboBox modePicker = new() { ItemsSource = new[] { "Snap to edge", "Position" }, SelectedIndex = 0, Width = 134 };
     private readonly ComboBox edgeChannel = new() { Width = 74 };
@@ -179,7 +179,7 @@ public sealed partial class MainWindow : Window
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
         hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(waveformGrid, Band(measurement), 1);
         WireAppearance(); Content = page; Model.Changed += Refresh;
-        _decoder.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(I2cDecoderViewModel.IsOpen)) Refresh(); };
+        _decoder.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DecoderViewModel.IsOpen)) Refresh(); };
         Model.Changed += ScheduleTitleUpdate;
         titleUpdate.Tick += (_, _) => { titleUpdate.Stop(); UpdateAnalysisTitle(); };
         aTime.TextChanged += (_, _) => ScheduleTitleUpdate(); bTime.TextChanged += (_, _) => ScheduleTitleUpdate();
