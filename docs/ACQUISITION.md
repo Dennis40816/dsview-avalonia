@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # Capture acquisition lifecycle
 
 `AcquisitionSession` now provides a background acquisition pipeline and a paced
-raw Clock and I2C + Interrupt Demo sources. The App wires them through an independent acquisition
+raw Clock, I2C + Interrupt and UART Demo sources. The App wires them through an independent acquisition
 view model, setup pane and Start/Stop/Review action. Native UI interaction and
 layout acceptance are still pending. The native USB preparation component is not
 yet an acquisition source. Existing offline example loading remains separate.
@@ -79,7 +79,7 @@ sample rate/limit and integer half-period. It uses the same writer/session as
 future hardware adapters. Delivery is paced by batch duration and cancellation
 interrupts pending timers. Sub-millisecond delays may complete immediately under
 .NET timer resolution; sample positions and frequency always derive from the
-sample grid, never elapsed wall time. Both sources share this small sample pump.
+sample grid, never elapsed wall time. All scenarios share this small sample pump.
 
 `DemoI2cSource` generates SCL, SDA and active-low INT_N on three configurable
 physical channels. Each repeated transaction writes register 0x10 at address
@@ -88,7 +88,17 @@ The interrupt begins before START and ends after STOP. A quiet interval separate
 transactions. The App attaches the explicitly configured SCL/SDA roles, but no
 packets. **Decode I2C** sends the acquired signals through the existing decoder;
 it requires a configured native I2C runtime. This is an explicit action after
-publication, not continuous decoding. SPI/UART scenarios remain pending.
+publication, not continuous decoding.
+
+`DemoUartSource` emits an idle-high TX signal on a configurable physical channel.
+Each burst contains 0x55, 0xA5, 0x00 and 0xFF as consecutive 8N1 frames, LSB first.
+Eight idle bit slots precede a burst and sixteen follow it. Baud rate must fit
+at least four whole samples per bit; for 115200 baud, 1152000 samples/s is one
+valid choice. Odd counts such as nine samples per bit also work. This restriction
+belongs to this deterministic generator, not to imported UART capture analysis.
+The App configures the known TX role and baud, and **Decode UART** runs the shared
+native decoder. The button follows the current capture even when the next
+capture's draft changes. SPI Demo remains pending.
 
 The standalone checks depend only on Domain/Infrastructure, without Avalonia or
 native hardware runtimes:
@@ -101,7 +111,7 @@ dotnet <output>/bin/DSView.Acquisition.Checks/debug/DSView.Acquisition.Checks.dl
 They cover buffer reuse before any consumer runs, batch boundary transitions,
 D0/D31 among 32 channels, queue and transition limits, malformed input, empty and
 short data, marked partial outcomes, waiting for teardown, late results after
-abort, and both Demo sources with manually advanced timers. Timing assertions
+abort, and the Demo sources with manually advanced timers. Timing assertions
 use independent sample positions; tests do not sleep for an expected duration.
 These are managed acquisition behavior checks, not App interaction or hardware
 acceptance. Additional checks in `DSView.Checks --acquisition-workflow-only` exercise
@@ -110,13 +120,18 @@ save/reopen. `--demo-workflow-only --native-i2c <configuration>` additionally
 checks actual I2C decoding, independent expected bytes/timestamps, cross-channel
 cursors, remapped pins/rate and a capture ending inside a byte. Acquisition may
 complete its requested sample count while its last protocol transaction remains
-incomplete; no trailing byte, NACK or STOP is invented. Native UI interaction,
+incomplete; no trailing byte, NACK or STOP is invented. Add
+`--native-serial <configuration>` to that command to check UART acquisition,
+native decoding, exact frame starts, changed baud/pins, save/reopen and capture
+ending before the stop-bit center. Seeing a data word is not proof of a complete
+UART frame. Native UI interaction,
 structured saved metadata and live display performance still require evidence.
 
 ## App workflow
 
-The header's **Demo** button opens Capture setup. It offers Clock and I2C + Interrupt
-scenarios with physical channels, sample rate, duration and clock frequency. The
+The header's **Demo** button opens Capture setup. It offers Clock, I2C + Interrupt
+and UART 8N1 scenarios with physical channels, sample rate and duration. Clock/I2C
+show clock frequency; UART shows baud rate and hides the I2C-only roles. The
 defaults request one second at 1 MS/s with a 10 kHz clock. Invalid or fractional
 sample timing cannot start. Switching scenarios preserves the entered timing.
 I2C requires three distinct channels and four whole sample intervals per cycle.

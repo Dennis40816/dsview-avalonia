@@ -41,7 +41,7 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
         CancelCommand = new AsyncRelayCommand(StopAsync, () => IsAcquiring);
         ToggleCommand = new RelayCommand(() => IsOpen = !IsOpen);
         CloseCommand = new RelayCommand(() => IsOpen = false);
-        DecodeDemoCommand = new RelayCommand(() => decodeRequested?.Invoke("demo-i2c"), () => CanDecodeDemo && available());
+        DecodeDemoCommand = new RelayCommand(() => { if (DemoDecoder is { } binding) decodeRequested?.Invoke(binding.Id); }, () => CanDecodeDemo && available());
         Draft.PropertyChanged += (_, _) => Refresh(); model.Changed += SourceChanged;
         StartCommand.PropertyChanged += (_, _) => Refresh(); AcceptCommand.PropertyChanged += (_, _) => Refresh();
     }
@@ -55,8 +55,10 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     public IRelayCommand ToggleCommand { get; }
     public IRelayCommand CloseCommand { get; }
     public IRelayCommand DecodeDemoCommand { get; }
-    public bool CanDecodeDemo => decodeRequested != null && !IsBusy && !HasResult
-        && model.Capture?.EffectiveDecoderSources.Any(s => s.Id == "demo-i2c" && s.EffectiveProtocol == "i2c") == true;
+    private DecoderSource? DemoDecoder => model.Capture?.EffectiveDecoderSources.FirstOrDefault(s =>
+        s.Id == "demo-i2c" && s.EffectiveProtocol == "i2c" || s.Id == "demo-uart" && s.EffectiveProtocol == "uart");
+    public bool CanDecodeDemo => decodeRequested != null && !IsBusy && !HasResult && DemoDecoder != null;
+    public string DecodeLabel => DemoDecoder?.EffectiveProtocol == "uart" ? "Decode UART" : "Decode I²C";
     public bool IsOpen { get => open; set => SetProperty(ref open, value); }
     public bool IsAcquiring => session != null && sourceTask?.IsCompleted != true;
     public bool IsBusy => StartCommand.IsRunning || AcceptCommand.IsRunning;
@@ -84,7 +86,7 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
         foreach (string property in new[] { nameof(IsAcquiring), nameof(IsBusy), nameof(CanEdit), nameof(HasResult), nameof(PrimaryLabel), nameof(ShowStartIcon), nameof(ResultLabel), nameof(Problem), nameof(HasProblem), nameof(CanDecodeDemo) }) OnPropertyChanged(property);
         StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); PrimaryCommand.NotifyCanExecuteChanged();
         AcceptCommand.NotifyCanExecuteChanged(); DiscardCommand.NotifyCanExecuteChanged(); CancelCommand.NotifyCanExecuteChanged();
-        DecodeDemoCommand.NotifyCanExecuteChanged();
+        OnPropertyChanged(nameof(DecodeLabel)); DecodeDemoCommand.NotifyCanExecuteChanged();
     }
     private void SourceChanged()
     {

@@ -47,13 +47,13 @@
             <TextBox Text="{Binding Draft.Duration, Mode=TwoWay}" AutomationProperties.Name="Demo duration in milliseconds" />
           </StackPanel>
           <StackPanel Spacing="6">
-            <TextBlock Text="Clock frequency · Hz" Foreground="#9BAEBF" />
-            <TextBox Text="{Binding Draft.Frequency, Mode=TwoWay}" AutomationProperties.Name="Demo clock frequency in Hertz" />
+            <TextBlock Text="{Binding Draft.FrequencyLabel}" Foreground="#9BAEBF" />
+            <TextBox Text="{Binding Draft.Frequency, Mode=TwoWay}" AutomationProperties.Name="{Binding Draft.FrequencyLabel}" />
           </StackPanel>
         </StackPanel>
         <TextBlock Text="{Binding Problem}" IsVisible="{Binding HasProblem}" Foreground="#FFCC80" TextWrapping="Wrap" />
         <TextBlock Text="{Binding Status}" IsVisible="{Binding HasStatus}" TextWrapping="Wrap" />
-        <Button Content="Decode I²C" Classes="flat" Command="{Binding DecodeDemoCommand}" IsVisible="{Binding CanDecodeDemo}" HorizontalAlignment="Left" />
+        <Button Content="{Binding DecodeLabel}" Classes="flat" Command="{Binding DecodeDemoCommand}" IsVisible="{Binding CanDecodeDemo}" HorizontalAlignment="Left" />
         <StackPanel Spacing="8" IsVisible="{Binding HasResult}">
           <Button Content="{Binding ResultLabel}" Classes="primary" Command="{Binding AcceptCommand}" HorizontalAlignment="Stretch" />
           <Button Content="Keep current analysis" Classes="flat" Command="{Binding DiscardCommand}" HorizontalAlignment="Stretch" />

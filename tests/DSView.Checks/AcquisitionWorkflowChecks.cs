@@ -19,17 +19,26 @@ internal static class AcquisitionWorkflowChecks
     public static async Task RunAsync(Action<bool,string> check)
     {
         var draft = new DemoCaptureDraft();
-        check(draft.TryCreate(out var settings)=="" && settings == new DemoCaptureSettings(0,1_000_000,1_000_000,50),
+        check(draft.TryCreate(out var settings)=="" && settings == new DemoCaptureSettings(0,1_000_000,1_000_000,10000),
             "Demo defaults define one second at 1 MS/s and a 10 kHz clock");
         draft.Frequency="333333"; check(draft.TryCreate(out _)!="", "Demo rejects a frequency that cannot fit the integer sample grid");
         draft.Frequency="10000"; draft.Duration="0.0001"; check(draft.TryCreate(out _)!="", "Demo cannot request a fractional or too-short sample capture");
         draft.Duration="1000"; draft.Channel="31"; check(draft.TryCreate(out settings)=="" && settings!.Channel==31,"Demo settings preserve physical channel D31");
         draft.Scenario="I²C + Interrupt"; draft.DataChannel="4"; draft.InterruptChannel="9";
-        check(draft.TryCreate(out settings)=="" && settings is { I2c:true,Channel:31,DataChannel:4,InterruptChannel:9,HalfPeriod:50 },
+        check(draft.TryCreate(out settings)=="" && settings is { Scenario:DemoScenario.I2c,Channel:31,DataChannel:4,InterruptChannel:9,Frequency:10000 },
             "I2C scenario settings retain independent SCL, SDA and Interrupt mapping");
         draft.DataChannel="31"; check(draft.TryCreate(out _)!="","I2C scenario rejects duplicated physical roles");
         draft.DataChannel="4"; draft.Frequency="100000"; check(draft.TryCreate(out _)!="","I2C scenario requires four whole sample phases, not a rounded clock");
         draft.Scenario="Unknown"; check(draft.TryCreate(out _)!="","Unknown Demo scenarios are not silently treated as clock captures");
+        draft.Scenario="UART · 8N1"; draft.Frequency="115200";
+        check(draft.TryCreate(out _)!="","UART Demo rejects fractional sample timing rather than silently rounding baud");
+        draft.Rate="1152000"; draft.DataChannel="invalid"; draft.InterruptChannel="invalid";
+        check(draft.TryCreate(out settings)=="" && settings is {Scenario:DemoScenario.Uart,Channel:31,Frequency:115200}
+            && draft.ChannelLabel.StartsWith("TX") && draft.FrequencyLabel.StartsWith("Baud"),
+            "UART setup uses TX and baud, and ignores hidden I2C-only fields");
+        draft.Rate="345600"; check(draft.TryCreate(out _)!="","UART Demo rejects fewer than four samples per bit");
+        draft.Rate="1036800"; check(draft.TryCreate(out settings)=="" && settings!.Frequency==115200,
+            "UART accepts nine whole samples per bit without imposing clock half-period rules");
 
         var model=Model(); var old=model.Capture; int published=0;
         await using (var vm=new AcquisitionViewModel(model,()=>true,()=>Task.FromResult(true),_=>published++,_=>Complete()))

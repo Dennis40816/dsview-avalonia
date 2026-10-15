@@ -189,4 +189,18 @@ await using (var session = new AcquisitionSession(new DemoI2cSource(1000,512,1,3
     Check(raw.MeasureAt(31,21) is { WidthSamples:2,PeriodSamples:4,HighSamples:2 },
         "I2C clock measurement derives a complete 4-sample cycle from actual SCL transitions");
 }
+var uartTime = new ControlledTime();
+await using (var uart = new AcquisitionSession(new DemoUartSource(1_000,640,100,31,uartTime),new(BatchSamples:640)))
+{
+    var job=uart.RunAsync();
+    (await uartTime.NextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10))).Fire();
+    var result=await job.WaitAsync(TimeSpan.FromSeconds(10)); var raw=result.RawCapture!;
+    Check(result.CanPublish && raw.Signals.Single() is {Id:31,Initial:true} && raw.Packets.Count==0 && raw.DecoderSources!.Length==0,
+        "UART Demo captures an idle-high D31 raw signal without prefilled frames");
+    Check(raw.Signals.Single().Edges.Where(e=>e.Sample<180).SequenceEqual(new Edge[]{new(80,false),new(90,true),new(100,false),new(110,true),new(120,false),new(130,true),new(140,false),new(150,true),new(160,false),new(170,true)}),
+        "UART 55 frame has independently expected START, LSB-first transitions and STOP on the sample grid");
+    Check(raw.MeasureAt(31,95) is {WidthSamples:10,PeriodSamples:20} && raw.Signals.Single().Edges.Contains(new Edge(280,false))
+        && raw.Signals.Single().Edges.Contains(new Edge(370,true)),
+        "UART measures actual data pulses and retains the nine-bit low interval of byte 00 without inventing edges");
+}
 Console.WriteLine($"{passed} acquisition checks passed.");
