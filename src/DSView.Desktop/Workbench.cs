@@ -39,6 +39,7 @@ public sealed partial class Workbench : ObservableObject
     private Capture? cachedCapture;
     private Signal[] cachedSignals = [];
     private Decoder[] cachedDecoders = [];
+    private Decoder[] cachedSources = [];
     public string Query { get; private set; } = "";
     private readonly Stack<(double Start, double End, ObservationGroup Group)> history = new();
     public event Action? Changed;
@@ -98,16 +99,20 @@ public sealed partial class Workbench : ObservableObject
     private void CacheScope()
     {
         if (ReferenceEquals(cachedCapture, Capture) && ReferenceEquals(cachedGroup, Group)) return;
+        if (!ReferenceEquals(cachedCapture, Capture)) cachedSources = Capture?.ResolvedDecoders.ToArray() ?? [];
         cachedCapture = Capture; cachedGroup = Group;
         cachedSignals = Capture?.Signals.Where(s => Group.Channels.Contains(s.Id)).ToArray() ?? [];
         cachedDecoders = Capture?.Packets.Count > 0
-            ? DSView.Domain.Capture.Decoders.Where(d => Group.Decoders.Contains(d.Id) && d.Channels.All(id => cachedSignals.Any(s => s.Id == id))).ToArray()
+            ? cachedSources.Where(d => (IsAllSignals || Group.Decoders.Contains(d.Id))
+                && Capture.Packets.Any(p => p.Decoder == d.Id) && d.Channels.All(id => cachedSignals.Any(s => s.Id == id))).ToArray()
             : [];
     }
     public IReadOnlyList<Signal> Signals { get { CacheScope(); return cachedSignals; } }
     public IReadOnlyList<Decoder> Decoders { get { CacheScope(); return cachedDecoders; } }
+    private IReadOnlyList<Decoder> SourceDecoders { get { CacheScope(); return cachedSources; } }
     public bool IsAllSignals => Group.Name == "All signals";
-    private bool InPacketScope(Packet packet) => IsAllSignals || Group.Decoders.Contains(packet.Decoder);
+    private bool InPacketScope(Packet packet) => IsAllSignals || Group.Decoders.Contains(packet.Decoder)
+        && SourceDecoders.Any(d => d.Id == packet.Decoder && d.Channels.All(Group.Channels.Contains));
     private bool MatchesSearch(Packet packet) => string.IsNullOrWhiteSpace(Query) || $"{packet.Id} {packet.Hex} {packet.Address} {packet.Title} {packet.Error} 0x{packet.Value:X}".Contains(Query, StringComparison.OrdinalIgnoreCase);
     public IEnumerable<Packet> Packets => (Capture?.Packets ?? []).Where(p => InPacketScope(p) && MatchesSearch(p));
     public PacketView PacketView()
@@ -119,7 +124,7 @@ public sealed partial class Workbench : ObservableObject
         var matches = scoped.Where(MatchesSearch).ToArray();
         return new(matches, matches.Length == 0 ? PacketEmptyReason.Search : PacketEmptyReason.None);
     }
-    public bool SelectionInGroup => Selected == null || IsAllSignals || Group.Decoders.Contains(Selected.Decoder);
+    public bool SelectionInGroup => Selected == null || InPacketScope(Selected);
     public string PacketSelectionContext => Selected == null ? "" : !SelectionInGroup ? "Selected packet is outside this Group."
         : PacketsTab && !MatchesSearch(Selected) ? "Selected packet is outside this search."
         : !PacketsTab && ((SelectedProtocol?.Span ?? Selected.Span).End < Start || (SelectedProtocol?.Span ?? Selected.Span).Start > End) ? "Source is outside the time view." : "";
@@ -128,6 +133,7 @@ public sealed partial class Workbench : ObservableObject
     public void Load(Capture capture)
     {
         if (capture.SampleRate <= 0 || capture.SampleCount < 10) throw new ArgumentException("Capture needs a valid sample rate and at least 10 samples.");
+        DecoderSource.Validate(capture.EffectiveDecoderSources);
         keptMeasurements.Clear(); removedMeasurement = null;
         Capture = capture; A = B = Probe = null; PinnedMeasurement = null; Selected = null; SelectedIssue = null; Issues = capture.Issues; Details = false;
         SelectedProtocol = null; SelectedProtocolIndex = null;
@@ -137,6 +143,19 @@ public sealed partial class Workbench : ObservableObject
         SetRange(0, capture.SampleCount);
     }
     public void Notify() { OnPropertyChanged(string.Empty); Changed?.Invoke(); }
+    public bool ApplyI2cResult(I2cDecodeResult result)
+    {
+        if (!ReferenceEquals(Capture, result.Source) || HasPendingEdit) return false;
+        var decoded = result.ToCapture();
+        Capture = decoded; Issues = decoded.Issues;
+        // A packet ordinal or byte selection from the old decode is not evidence
+        // of the same selection in the replacement result, even if IDs match.
+        if (Selected != null && !decoded.Packets.Any(p => ReferenceEquals(p, Selected)))
+        { Selected = null; SelectedIssue = null; SelectedProtocol = null; SelectedProtocolIndex = null; Details = false; }
+        else if (SelectedIssue is { } priorIssue)
+            SelectedIssue = Issues.FirstOrDefault(i => ReferenceEquals(i.Packet, priorIssue.Packet) && ReferenceEquals(i.Diagnostic, priorIssue.Diagnostic));
+        Notify(); return true;
+    }
     public void SetGroup(ObservationGroup group) { Group = group; if (Probe != null && !group.Channels.Contains(Probe.Channel)) Probe = null; if (!SelectionInGroup) Details = false; Notify(); }
     public void ShowAll() { PacketsTab = false; SetGroup(Groups.First(g => g.Name == "All signals")); }
     public void ShowAllPackets() { Query = ""; PacketsTab = true; SetGroup(Groups.First(g => g.Name == "All signals")); }
@@ -167,7 +186,7 @@ public sealed partial class Workbench : ObservableObject
         long first = spans.Min(s => s.Start), last = spans.Max(s => s.End);
         double pad = Math.Max(10, (last - first) * .2);
         SetRange(first - pad, last + pad);
-        var source = DSView.Domain.Capture.Decoders.FirstOrDefault(d => d.Id == issue.Packet.Decoder)?.Channels.FirstOrDefault();
+        var source = SourceDecoders.FirstOrDefault(d => d.Id == issue.Packet.Decoder)?.Channels.FirstOrDefault();
         if (source is int channel) SignalFocusRequested?.Invoke(channel);
     }
     public void SelectIssue(CaptureIssue issue)
@@ -194,12 +213,12 @@ public sealed partial class Workbench : ObservableObject
         PacketsTab = false; var source = SelectedProtocol?.Span ?? Selected.Span;
         double pad = Math.Max(10, (source.End - source.Start) * (SelectedProtocol == null ? .08 : .2));
         SetRange(source.Start - pad, source.End + pad);
-        var channel = DSView.Domain.Capture.Decoders.FirstOrDefault(d => d.Id == Selected.Decoder)?.Channels.FirstOrDefault();
+        var channel = SourceDecoders.FirstOrDefault(d => d.Id == Selected.Decoder)?.Channels.FirstOrDefault();
         if (channel is int id) SignalFocusRequested?.Invoke(id);
     }
     private ObservationGroup SourceGroup(string decoderId)
     {
-        var decoder = DSView.Domain.Capture.Decoders.FirstOrDefault(d => d.Id == decoderId);
+        var decoder = SourceDecoders.FirstOrDefault(d => d.Id == decoderId);
         var existing = Groups.FirstOrDefault(g => g.Decoders.Contains(decoderId) && (decoder == null || decoder.Channels.All(g.Channels.Contains)));
         if (existing != null) return existing;
         if (decoder == null) return Groups.First(g => g.Name == "All signals");

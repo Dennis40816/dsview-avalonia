@@ -21,4 +21,14 @@ public sealed record I2cChannelMap(int Scl, int Sda)
 
 // Keeps physical roles and source identity with the result. This is not a saved
 // analysis: mapped results need capture-scoped tracks before UI publication.
-public sealed record I2cDecodeResult(Capture Source, I2cChannelMap Channels, IReadOnlyList<Packet> Packets);
+public sealed record I2cDecodeResult(Capture Source, I2cChannelMap Channels, IReadOnlyList<Packet> Packets)
+{
+    public Capture ToCapture()
+    {
+        Channels.Resolve(Source);
+        var binding = new DecoderSource("i2c", [new("scl", Channels.Scl), new("sda", Channels.Sda)]);
+        var sources = Source.EffectiveDecoderSources.Where(s => s.Id != "i2c").Prepend(binding).ToArray();
+        DecoderSource.Validate(sources);
+        return I2cEventAdapter.ReplacePackets(Source, Packets) with { DecoderSources = sources };
+    }
+}

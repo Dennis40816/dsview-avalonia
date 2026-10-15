@@ -6,7 +6,7 @@ namespace DSView.Domain;
 public sealed record AnalysisDocument(string Format, int Version, string SourceName, Capture Capture, AnalysisState State)
 {
     public const string FileFormat = "DSView2 analysis";
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
 }
 
 public sealed record ViewAnchor(int? Channel, double Offset);

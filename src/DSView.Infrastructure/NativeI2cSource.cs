@@ -34,7 +34,7 @@ public static class NativeI2cSource
     public static async Task<Capture> DecodeAsync(Capture raw, NativeI2cOptions options, CancellationToken cancellation = default)
     {
         var result = await DecodeMappedAsync(raw, new(0, 1), options, cancellation).ConfigureAwait(false);
-        return I2cEventAdapter.ReplacePackets(raw, result.Packets);
+        return result.ToCapture();
     }
     public static Task<I2cDecodeResult> DecodeMappedAsync(Capture raw, I2cChannelMap channels, NativeI2cOptions options, CancellationToken cancellation = default) =>
         Task.Run(() => DecodeCoreAsync(raw, channels, options, cancellation), cancellation);

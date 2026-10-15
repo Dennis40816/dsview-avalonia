@@ -19,7 +19,7 @@ public sealed class GroupEditState
         bool aggregate = original?.Name == "All signals";
         Channels = aggregate ? CapturedChannels.ToHashSet() : (original?.Channels ?? []).ToHashSet();
         Decoders = aggregate ? [] : (original?.Decoders ?? []).ToHashSet();
-        OfferedDecoders = Capture.Decoders.Where(d => d.Channels.All(CapturedChannels.Contains) || Decoders.Contains(d.Id)).ToArray();
+        OfferedDecoders = (capture?.ResolvedDecoders ?? Capture.Decoders).Where(d => d.Channels.All(CapturedChannels.Contains) || Decoders.Contains(d.Id)).ToArray();
         foreach (var decoder in OfferedDecoders.Where(d => Decoders.Contains(d.Id))) Channels.UnionWith(decoder.Channels);
         OfferedChannels = CapturedChannels.Concat(Channels).Distinct().Order().ToArray();
     }
@@ -63,6 +63,8 @@ public sealed class GroupEditState
         .Select(g =>
         {
             var decoders = Capture.Decoders.Where(d => g.Decoders.Contains(d.Id)).ToArray();
-            return new ObservationGroup(g.Name, g.Channels.Concat(decoders.SelectMany(d => d.Channels)).Distinct().Order().ToArray(), decoders.Select(d => d.Id).ToArray());
+            // Preferences are reusable memberships, not evidence of a capture's
+            // decoder wiring. Do not inject the demo's D0/D1 into mapped Groups.
+            return new ObservationGroup(g.Name, g.Channels.Distinct().Order().ToArray(), decoders.Select(d => d.Id).ToArray());
         }).ToArray();
 }

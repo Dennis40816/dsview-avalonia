@@ -83,12 +83,17 @@ signal-list order, and keeps SCL/SDA in the worker's two-plane order. It never
 renumbers the source or copies unrelated channels into those planes.
 
 The returned `I2cDecodeResult` holds the exact source reference, the role map
-and decoded packets separately. It does not replace the current capture.
-The UI must check source identity and job generation before publishing results.
-Mapped results are deliberately not returned as a ready-to-display `Capture`:
-the current UI track metadata still assumes the example's fixed channel roles.
-Capture-scoped tracks, source navigation, group membership and versioned saved
-mapping must be integrated together before enabling this in the App.
+and decoded packets separately. `ToCapture` creates a new capture with explicit
+role metadata; it does not mutate its source. The Workbench's `ApplyI2cResult`
+requires the current source reference and refuses publication during a pending
+measurement edit. It preserves time view, Groups, colors and retained timing.
+Replaced packet selections are cleared even if IDs repeat; unrelated packet
+and diagnostic selections remain attached to current evidence.
+
+Tracks, Group scope and Locate use capture-specific roles. Analysis version 4
+stores them with the packet snapshot and restores without executing a decoder.
+The App still needs a role-selection/decode workflow with job generation and
+cancellation before users can run this against the current imported capture.
 
 The existing fixed-role `DecodeAsync` path replaces only the `i2c` records.
 It retains other protocol objects, raw signals, source description and capture

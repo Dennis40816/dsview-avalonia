@@ -30,7 +30,7 @@ internal static class AnalysisFileChecks
                 && reopened.Capture.Packets.Single(p => p.Id == "ctl-2").Fields.SelectMany(f => f.Raw).SequenceEqual(issue.Packet.Fields.SelectMany(f => f.Raw)), "Saved decoded bytes, fields and separate protocol events retain their exact source spans");
 
             restored.SetTab(false); restored.Clear(); restored.Pick(0, 25_025, 1);
-            var local = document with { Capture = reopened.Capture, State = restored.SnapshotState(new(null, 0), 0) };
+            var local = document with { Version = AnalysisDocument.CurrentVersion, Capture = reopened.Capture, State = restored.SnapshotState(new(null, 0), 0) };
             await AnalysisFile.WriteAsync(file, local); restored.RestoreAnalysis(await AnalysisFile.ReadAsync(file));
             check(restored.PinnedMeasurement is { WidthSamples: 63, PeriodSamples: 125, HighSamples: 62 } && TimingText.Local(restored.PinnedMeasurement, restored.Capture!.SampleRate).Contains("400 kHz"), "Restoring a local pulse recomputes width and frequency from saved raw samples");
             restored.Arm(1);

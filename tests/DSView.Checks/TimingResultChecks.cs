@@ -67,19 +67,21 @@ internal static class TimingResultChecks
         try
         {
             await AnalysisFile.WriteAsync(path, document); var reopened = await AnalysisFile.ReadAsync(path); var loaded = new Workbench(); loaded.RestoreAnalysis(reopened);
-            check(loaded.Measurements.SequenceEqual(model.Measurements) && reopened.Version == 3 && loaded.SelectedProtocolIndex == 9, "Version 3 round trip retains every result, note, source, kind and separate byte selection");
+            check(loaded.Measurements.SequenceEqual(model.Measurements) && reopened.Version == 4 && loaded.SelectedProtocolIndex == 9, "Version 4 round trip retains every result, note, source, kind and separate byte selection");
             var json = JsonNode.Parse(await File.ReadAllTextAsync(path))!;
             foreach (int version in new[] { 1, 2 })
             {
                 var legacy = json.DeepClone(); legacy["version"] = version; legacy["state"]!.AsObject().Remove("measurements");
+                legacy["capture"]!.AsObject().Remove("decoderSources");
                 if (version == 1) legacy["state"]!.AsObject().Remove("selectedProtocolIndex");
                 await File.WriteAllTextAsync(path, legacy.ToJsonString()); var old = await AnalysisFile.ReadAsync(path);
                 await AnalysisFile.WriteAsync(path, old); var upgraded = await AnalysisFile.ReadAsync(path);
-                check(old.State.Measurements is { Length: 0 } && upgraded.Version == 3 && upgraded.State.Measurements is { Length: 0 }, $"Version {version} without results migrates to empty and writes complete version 3 evidence");
+                check(old.State.Measurements is { Length: 0 } && upgraded.Version == 4 && upgraded.State.Measurements is { Length: 0 }, $"Version {version} without results migrates to empty and writes complete version 4 evidence");
             }
             foreach (bool absent in new[] { true, false })
             {
                 var bad = json.DeepClone(); if (absent) bad["state"]!.AsObject().Remove("measurements"); else bad["state"]!["measurements"] = null;
+                bad["version"] = 3; bad["capture"]!.AsObject().Remove("decoderSources");
                 await File.WriteAllTextAsync(path, bad.ToJsonString()); bool failed = false;
                 try { await AnalysisFile.ReadAsync(path); } catch (InvalidDataException) { failed = true; }
                 check(failed, $"Version 3 {(absent ? "missing" : "null")} results are rejected instead of silently losing notes");

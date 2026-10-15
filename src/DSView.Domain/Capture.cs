@@ -75,6 +75,14 @@ public sealed record Endpoint(int Channel, long Sample, bool IsEdge);
 public sealed record Capture(long SampleRate, long SampleCount, IReadOnlyList<Signal> Signals, IReadOnlyList<Packet> Packets)
 {
     public string SourceDescription { get; init; } = "Synthetic waveforms with precomputed protocol annotations. This example does not run a raw decoder. No hardware capture.";
+    // Null only for legacy in-memory captures and v1-v3 files. v4 files store
+    // explicit sources, including declared inputs absent from partial raw data.
+    public DecoderSource[]? DecoderSources { get; init; }
+    public IReadOnlyList<DecoderSource> EffectiveDecoderSources => DecoderSources ?? DecoderSource.LegacyDefaults();
+    public IReadOnlyList<Decoder> ResolvedDecoders => EffectiveDecoderSources.Select(source =>
+        new Decoder(source.Id, Decoders.First(d => d.Id == source.Id).Name,
+            DecoderSource.LegacyDefaults().First(d => d.Id == source.Id).Inputs
+                .Select(role => source.Inputs.Single(i => i.Role == role.Role).Channel).ToArray())).ToArray();
     // Half-open intervals where samples are absent. Silence alone is not a gap.
     public IReadOnlyList<SourceSpan> Gaps { get; init; } = [];
     public bool HasSample(long sample) => sample >= 0 && sample < SampleCount && !Gaps.Any(g => g.Start <= sample && g.End > sample);

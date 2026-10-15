@@ -58,6 +58,7 @@ internal static class ProtocolSelectionChecks
             check(restored.SelectedProtocol is { DataIndex: 3, Label: "0x35" } saved && saved.Span == items[index].Span && restored.A == a && restored.B == b,
                 "Current version reopens selected byte from the saved graph with unchanged A/B");
             var legacy = JsonNode.Parse(await File.ReadAllTextAsync(path))!; legacy["version"] = 1; legacy["state"]!.AsObject().Remove("selectedProtocolIndex");
+            legacy["capture"]!.AsObject().Remove("decoderSources");
             await File.WriteAllTextAsync(path, legacy.ToJsonString()); var old = await AnalysisFile.ReadAsync(path); restored.RestoreAnalysis(old);
             check(restored.Selected?.Id == packet.Id && restored.SelectedProtocol == null && restored.A == a, "Version 1 files without element selection reopen at packet level");
             await AnalysisFile.WriteAsync(path, old);

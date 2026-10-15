@@ -43,7 +43,7 @@ internal static class GroupEditingChecks
         var reopened = GroupEditState.Restore(JsonSerializer.Deserialize<ObservationGroup[]>(JsonSerializer.Serialize(saved)));
         check(reopened.Length == 25 && reopened.Select(g => g.Name).SequenceEqual(saved.Select(g => g.Name))
             && reopened.Single(g => g.Name == "Group 25").Channels.SequenceEqual(new[] { 0, 1, 8 }), "All 25 valid saved Groups survive serialization and the actual restore normalizer, including the last active candidate");
-        check(GroupEditState.Restore([new("One", [8], ["i2c"])]).Single().Channels.SequenceEqual(new[] { 0, 1, 8 })
-            && GroupEditState.Restore([null!, new("ALL SIGNALS", [0], []), new("Bad", [32], [])]).Length == 0, "Preference restoration preserves decoder source invariants and rejects malformed or reserved aggregate entries");
+        check(GroupEditState.Restore([new("One", [8], ["i2c"])]).Single().Channels.SequenceEqual(new[] { 8 })
+            && GroupEditState.Restore([null!, new("ALL SIGNALS", [0], []), new("Bad", [32], [])]).Length == 0, "Preference restoration preserves exact reusable membership without injecting demo decoder channels and rejects malformed entries");
     }
 }

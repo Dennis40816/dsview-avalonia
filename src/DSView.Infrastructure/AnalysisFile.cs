@@ -15,7 +15,7 @@ public static class AnalysisFile
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase, IgnoreReadOnlyProperties = true,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, RespectRequiredConstructorParameters = true, MaxDepth = 32,
-        TypeInfoResolver = CreateResolver()
+        TypeInfoResolver = CreateResolver(), Converters = { new DecoderSourceJsonConverter() }
     };
     private static IJsonTypeInfoResolver CreateResolver()
     {
@@ -25,7 +25,8 @@ public static class AnalysisFile
             if (info.Kind != JsonTypeInfoKind.Object) return;
             for (int i = info.Properties.Count - 1; i >= 0; i--)
                 if (info.Properties[i].Set == null) info.Properties.RemoveAt(i); // Also excludes read-only collections such as Capture.Issues.
-                else info.Properties[i].IsRequired = !(info.Type == typeof(AnalysisState) && info.Properties[i].Name is "selectedProtocolIndex" or "measurements"); // Version-specific evidence requirements are validated below.
+                else info.Properties[i].IsRequired = !(info.Type == typeof(AnalysisState) && info.Properties[i].Name is "selectedProtocolIndex" or "measurements")
+                    && !(info.Type == typeof(Capture) && info.Properties[i].Name == "decoderSources"); // Version-specific evidence requirements are validated below.
         });
         return resolver;
     }
@@ -37,13 +38,16 @@ public static class AnalysisFile
         if (file.Length is <= 0 or > MaximumBytes) throw new InvalidDataException("Analysis file must be between 1 byte and 128 MiB.");
         var document = await JsonSerializer.DeserializeAsync<AnalysisDocument>(file, Json, cancellation)
             ?? throw new InvalidDataException("Analysis document is missing.");
+        if (document.Version >= 4 && document.Capture?.DecoderSources == null)
+            throw new InvalidDataException("Saved decoder sources are missing.");
         Validate(document, cancellation); return Normalize(document);
     }, cancellation);
 
     public static Task WriteAsync(string path, AnalysisDocument document, CancellationToken cancellation = default) => Task.Run(async () =>
     {
         Validate(document, cancellation);
-        document = Normalize(document) with { Version = AnalysisDocument.CurrentVersion };
+        document = Normalize(document) with { Version = AnalysisDocument.CurrentVersion,
+            Capture = document.Capture with { DecoderSources = document.Capture.EffectiveDecoderSources.ToArray() } };
         string destination = Path.GetFullPath(path);
         string temporary = Path.Combine(Path.GetDirectoryName(destination)!, ".dsview2-" + Guid.NewGuid().ToString("N") + ".tmp");
         try
@@ -119,6 +123,9 @@ public static class AnalysisFile
         Require(capture != null && state != null, "Capture or analysis state is missing.");
         Require(capture!.SampleRate > 0 && capture.SampleCount is >= 10 and <= 4_503_599_627_370_496, "Invalid sample rate or count.");
         Require(capture.Signals != null && capture.Signals.Count <= 32 && capture.Packets != null && capture.Packets.Count <= 100_000 && capture.Gaps != null && capture.Gaps.Count <= 10_000 && Text(capture.SourceDescription), "Invalid or excessive capture contents.");
+        Require(document.Version >= 4 || capture.DecoderSources == null, "Explicit decoder sources require analysis version 4.");
+        var decoderSources = capture.EffectiveDecoderSources;
+        DecoderSource.Validate(decoderSources);
         bool Span(SourceSpan? span, long maximum) => span != null && span.Start >= 0 && span.Start <= span.End && span.End <= maximum;
         Require(capture.Gaps!.All(g => Span(g, capture.SampleCount) && g.Start < g.End), "Invalid missing-data interval.");
         // Normalize only the validation lookup; preserve the exact saved gap list.
@@ -150,7 +157,7 @@ public static class AnalysisFile
         foreach (var packet in capture.Packets!)
         {
             cancellation.ThrowIfCancellationRequested();
-            Require(packet != null && Name(packet.Id) && packetIds.Add(packet.Id) && Capture.Decoders.Any(d => d.Id == packet.Decoder)
+            Require(packet != null && Name(packet.Id) && packetIds.Add(packet.Id) && decoderSources.Any(d => d.Id == packet.Decoder)
                 && Span(packet.Span, capture.SampleCount) && packet.Span.Start >= packetStart && packet.Bytes is { Length: <= 1_000_000 }
                 && Text(packet.Address) && Text(packet.Title) && (packet.Error == null || Text(packet.Error)) && packet.Fields != null
                 && packet.Fields.Count <= 1024 && packet.Diagnostics != null && packet.Diagnostics.Count <= 1024 && packet.WireCells != null, "Invalid decoded packet snapshot.");
@@ -168,7 +175,8 @@ public static class AnalysisFile
         foreach (var group in state.Groups!)
         {
             Require(group != null && Name(group.Name, 40) && groups.Add(group.Name) && group.Channels is { Length: > 0 and <= 32 } && group.Channels.Distinct().Count() == group.Channels.Length && group.Channels.All(c => c is >= 0 and < 32) && group.Decoders is { Length: <= 4 }, "Invalid or duplicate saved Group.");
-            Require(group!.Decoders.Distinct().Count() == group.Decoders.Length && group.Decoders.All(id => Capture.Decoders.Any(d => d.Id == id && d.Channels.All(group.Channels.Contains))), "Saved Group has invalid decoder sources.");
+            Require(group!.Decoders.Distinct().Count() == group.Decoders.Length && group.Decoders.All(id => Capture.Decoders.Any(d => d.Id == id
+                && (document.Version >= 4 || d.Channels.All(group.Channels.Contains)))), "Saved Group has invalid decoder sources.");
         }
         Require(state.ActiveGroup == "All signals" || state.Groups.Any(g => g.Name == state.ActiveGroup), "Active Group is missing.");
         Require(state.Colors!.All(c => c.Key is >= 0 and < 32 && c.Value != null && c.Value.Length is 7 or 9 && c.Value[0] == '#' && c.Value.Skip(1).All(Uri.IsHexDigit)), "Invalid waveform colors.");

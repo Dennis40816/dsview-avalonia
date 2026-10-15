@@ -26,7 +26,7 @@ Metadata Save/Cancel does not change endpoint evidence. Names are labels, not
 identity keys; duplicate labels are allowed. New captures clear their retained
 results after the existing Save / Discard / Cancel flow accepts replacement.
 
-Analysis version 3 stores up to 256 results, each with an 80-character name and
+Analysis versions 3 and 4 store up to 256 results, each with an 80-character name and
 2,048-character note. It requires the result collection; v1/v2 omission migrates
 to empty. File validation rejects invalid sources, local pulse claims, duplicate
 IDs and excess bounds before applying incoming state. Asynchronous saves freeze

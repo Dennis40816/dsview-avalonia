@@ -24,6 +24,9 @@ signals. Hardware acquisition and general capture-format support remain open.
 The workbench supports one signal Group at a time, all-channel navigation,
 custom waveform colors, Hex packet details, local high/low pulse width and
 complete-cycle period/frequency, and cross-channel A/B edge or position timing.
+Analysis version 4 also stores capture-specific decoder channel roles; versions
+1–3 remain readable. Current-capture role selection and background decode UI
+are still being integrated.
 The time ruler stays visible while scrolling channels. A local frequency is not
 a claim of a stable capture-wide clock.
 
