@@ -17,7 +17,7 @@
     <ScrollViewer HorizontalScrollBarVisibility="Disabled">
       <StackPanel Spacing="16" Margin="18">
         <Grid ColumnDefinitions="*,Auto">
-          <TextBlock Text="I簡C decoder" FontWeight="SemiBold" VerticalAlignment="Center" />
+          <TextBlock Text="Decoder" FontWeight="SemiBold" VerticalAlignment="Center" />
           <Button Grid.Column="1" Classes="flat" Command="{Binding CloseCommand}" Width="32" Padding="8"
                   ToolTip.Tip="Close and cancel pending decode" AutomationProperties.Name="Close decoder">
             <Path Data="M3,3 L13,13 M13,3 L3,13" Width="16" Height="16" Stretch="Uniform" Stroke="#C7D2DB" StrokeThickness="1.6" />

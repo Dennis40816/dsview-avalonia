@@ -37,7 +37,7 @@ internal sealed class AcquisitionBuffer(AcquisitionPlan plan, int maximumTransit
     {
         DecoderSources = [],
         SourceDescription = $"{plan.Kind}: {plan.SourceName}. {end}; retained {Count} of {plan.SampleLimit} requested samples. " +
-            "Raw digital samples; protocol decoding has not run. Time zero is the first retained sample."
+            "Raw digital samples. Time zero is the first retained sample."
     };
     public void Release() { for (int i = 0; i < edges.Length; i++) edges[i] = []; }
 }

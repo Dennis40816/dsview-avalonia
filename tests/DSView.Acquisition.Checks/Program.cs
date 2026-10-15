@@ -173,4 +173,20 @@ await using (var session = new AcquisitionSession(new DemoClockSource(time: stop
     Check(timer.IsDisposed && result.Termination == AcquisitionTermination.Stopped && result.RetainedSamples == 0 && result.RawCapture == null,
         "Stopping Demo during a pending batch cancels its timer and never invents undelivered data");
 }
+var i2cTime = new ControlledTime();
+await using (var session = new AcquisitionSession(new DemoI2cSource(1000,512,1,31,4,9,i2cTime),new(BatchSamples:127)))
+{
+    var job=session.RunAsync();
+    for(int i=0;i<5;i++) (await i2cTime.NextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(10))).Fire();
+    var result=await job.WaitAsync(TimeSpan.FromSeconds(10)); var raw=result.RawCapture!;
+    Check(result.CanPublish && raw.Signals.Select(s=>s.Id).SequenceEqual(new[]{4,9,31}) && raw.Packets.Count==0
+        && raw.DecoderSources!.Length==0,"I2C Demo acquires three physical channels and contains no fabricated decoder result");
+    Check(raw.Signals.Single(s=>s.Id==9).Edges.SequenceEqual(new Edge[]{new(8,false),new(216,true)})
+        && raw.Signals.Single(s=>s.Id==4).Edges.Contains(new Edge(16,false))
+        && raw.Signals.Single(s=>s.Id==4).Edges.Contains(new Edge(94,false))
+        && raw.Signals.Single(s=>s.Id==4).Edges.Contains(new Edge(208,true)),
+        "Independent I2C/interrupt timeline matches IRQ 8/216, START 16, repeated START 94 and STOP 208");
+    Check(raw.MeasureAt(31,21) is { WidthSamples:2,PeriodSamples:4,HighSamples:2 },
+        "I2C clock measurement derives a complete 4-sample cycle from actual SCL transitions");
+}
 Console.WriteLine($"{passed} acquisition checks passed.");

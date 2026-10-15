@@ -4,6 +4,7 @@
              x:DataType="local:AcquisitionViewModel" x:CompileBindings="True">
   <UserControl.Styles>
     <Style Selector="TextBox"><Setter Property="CornerRadius" Value="0" /><Setter Property="BorderThickness" Value="0,0,0,1" /></Style>
+    <Style Selector="ComboBox"><Setter Property="CornerRadius" Value="0" /><Setter Property="BorderThickness" Value="0,0,0,1" /><Setter Property="Background" Value="#192630" /></Style>
   </UserControl.Styles>
   <Border Background="#141F29" BorderBrush="#26343F" BorderThickness="1,0,0,0">
     <ScrollViewer HorizontalScrollBarVisibility="Disabled">
@@ -17,13 +18,25 @@
         </Grid>
         <StackPanel Spacing="6">
           <TextBlock Text="Source" Foreground="#9BAEBF" />
-          <TextBlock Text="Demo · Clock" FontWeight="SemiBold" />
-          <TextBlock Text="Generated signal. No device needed." Foreground="#9BAEBF" TextWrapping="Wrap" />
+          <TextBlock Text="Demo" FontWeight="SemiBold" />
+          <TextBlock Text="Generated signals. No device needed." Foreground="#9BAEBF" TextWrapping="Wrap" />
         </StackPanel>
         <StackPanel Spacing="14" IsEnabled="{Binding CanEdit}">
+          <StackPanel Spacing="6">
+            <TextBlock Text="Scenario" Foreground="#9BAEBF" />
+            <ComboBox ItemsSource="{Binding Draft.Scenarios}" SelectedItem="{Binding Draft.Scenario, Mode=TwoWay}" HorizontalAlignment="Stretch" AutomationProperties.Name="Demo scenario" />
+          </StackPanel>
           <Grid ColumnDefinitions="*,90">
-            <TextBlock Text="Signal number · D0–D31" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding Draft.ChannelLabel}" VerticalAlignment="Center" />
             <TextBox Grid.Column="1" Text="{Binding Draft.Channel, Mode=TwoWay}" AutomationProperties.Name="Demo physical channel number" />
+          </Grid>
+          <Grid ColumnDefinitions="*,90" IsVisible="{Binding Draft.IsI2c}">
+            <TextBlock Text="SDA · D0–D31" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Draft.DataChannel, Mode=TwoWay}" AutomationProperties.Name="Demo SDA channel number" />
+          </Grid>
+          <Grid ColumnDefinitions="*,90" IsVisible="{Binding Draft.IsI2c}">
+            <TextBlock Text="Interrupt · D0–D31" VerticalAlignment="Center" />
+            <TextBox Grid.Column="1" Text="{Binding Draft.InterruptChannel, Mode=TwoWay}" AutomationProperties.Name="Demo interrupt channel number" />
           </Grid>
           <StackPanel Spacing="6">
             <TextBlock Text="Sample rate · Hz" Foreground="#9BAEBF" />
@@ -40,6 +53,7 @@
         </StackPanel>
         <TextBlock Text="{Binding Problem}" IsVisible="{Binding HasProblem}" Foreground="#FFCC80" TextWrapping="Wrap" />
         <TextBlock Text="{Binding Status}" IsVisible="{Binding HasStatus}" TextWrapping="Wrap" />
+        <Button Content="Decode I²C" Classes="flat" Command="{Binding DecodeDemoCommand}" IsVisible="{Binding CanDecodeDemo}" HorizontalAlignment="Left" />
         <StackPanel Spacing="8" IsVisible="{Binding HasResult}">
           <Button Content="{Binding ResultLabel}" Classes="primary" Command="{Binding AcceptCommand}" HorizontalAlignment="Stretch" />
           <Button Content="Keep current analysis" Classes="flat" Command="{Binding DiscardCommand}" HorizontalAlignment="Stretch" />

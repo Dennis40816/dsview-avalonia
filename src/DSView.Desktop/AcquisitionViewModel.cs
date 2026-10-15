@@ -15,7 +15,8 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     private readonly Func<bool> available;
     private readonly Func<Task<bool>> confirmReplacement;
     private readonly Action<AcquisitionResult> published;
-    private readonly Func<DemoClockSettings, IAcquisitionSource> create;
+    private readonly Func<DemoCaptureSettings, IAcquisitionSource> create;
+    private readonly Action<string>? decodeRequested;
     private AcquisitionSession? session;
     private Task<AcquisitionResult>? sourceTask;
     private Capture? observed;
@@ -25,10 +26,11 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     private string status = "";
     private double progress;
     public AcquisitionViewModel(Workbench model, Func<bool> available, Func<Task<bool>> confirmReplacement,
-        Action<AcquisitionResult> published, Func<DemoClockSettings, IAcquisitionSource>? create = null)
+        Action<AcquisitionResult> published, Func<DemoCaptureSettings, IAcquisitionSource>? create = null, Action<string>? decodeRequested = null)
     {
         this.model = model; this.available = available; this.confirmReplacement = confirmReplacement;
         this.published = published; this.create = create ?? (settings => settings.CreateSource()); observed = model.Capture;
+        this.decodeRequested = decodeRequested;
         StartCommand = new AsyncRelayCommand(StartAsync, () => CanEdit && Problem.Length == 0 && available());
         StopCommand = new RelayCommand(() => { stopping = true; session?.RequestStop(); Status = "Stopping…"; Refresh(); }, () => IsAcquiring && !stopping);
         PrimaryCommand = new RelayCommand(() =>
@@ -39,10 +41,11 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
         CancelCommand = new AsyncRelayCommand(StopAsync, () => IsAcquiring);
         ToggleCommand = new RelayCommand(() => IsOpen = !IsOpen);
         CloseCommand = new RelayCommand(() => IsOpen = false);
+        DecodeDemoCommand = new RelayCommand(() => decodeRequested?.Invoke("demo-i2c"), () => CanDecodeDemo && available());
         Draft.PropertyChanged += (_, _) => Refresh(); model.Changed += SourceChanged;
         StartCommand.PropertyChanged += (_, _) => Refresh(); AcceptCommand.PropertyChanged += (_, _) => Refresh();
     }
-    public DemoClockDraft Draft { get; } = new();
+    public DemoCaptureDraft Draft { get; } = new();
     public IAsyncRelayCommand StartCommand { get; }
     public IRelayCommand StopCommand { get; }
     public IRelayCommand PrimaryCommand { get; }
@@ -51,6 +54,9 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     public IAsyncRelayCommand CancelCommand { get; }
     public IRelayCommand ToggleCommand { get; }
     public IRelayCommand CloseCommand { get; }
+    public IRelayCommand DecodeDemoCommand { get; }
+    public bool CanDecodeDemo => decodeRequested != null && !IsBusy && !HasResult
+        && model.Capture?.EffectiveDecoderSources.Any(s => s.Id == "demo-i2c" && s.EffectiveProtocol == "i2c") == true;
     public bool IsOpen { get => open; set => SetProperty(ref open, value); }
     public bool IsAcquiring => session != null && sourceTask?.IsCompleted != true;
     public bool IsBusy => StartCommand.IsRunning || AcceptCommand.IsRunning;
@@ -75,9 +81,10 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     }
     private void Refresh()
     {
-        foreach (string property in new[] { nameof(IsAcquiring), nameof(IsBusy), nameof(CanEdit), nameof(HasResult), nameof(PrimaryLabel), nameof(ShowStartIcon), nameof(ResultLabel), nameof(Problem), nameof(HasProblem) }) OnPropertyChanged(property);
+        foreach (string property in new[] { nameof(IsAcquiring), nameof(IsBusy), nameof(CanEdit), nameof(HasResult), nameof(PrimaryLabel), nameof(ShowStartIcon), nameof(ResultLabel), nameof(Problem), nameof(HasProblem), nameof(CanDecodeDemo) }) OnPropertyChanged(property);
         StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); PrimaryCommand.NotifyCanExecuteChanged();
         AcceptCommand.NotifyCanExecuteChanged(); DiscardCommand.NotifyCanExecuteChanged(); CancelCommand.NotifyCanExecuteChanged();
+        DecodeDemoCommand.NotifyCanExecuteChanged();
     }
     private void SourceChanged()
     {
@@ -100,7 +107,7 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
                 session = current; sourceTask = current.RunAsync(); Refresh();
                 var result = await sourceTask;
                 if (disposed || request != generation || result.Operation != current.Operation) return;
-                if (result.IsWorkbenchCompatible) pending = result;
+                if (result.IsWorkbenchCompatible) pending = result with { RawCapture = settings!.Configure(result.RawCapture!) };
                 Status = result.Termination switch
                 {
                     AcquisitionTermination.Completed => result.IsWorkbenchCompatible ? "Capture ready." : "Too few samples to display. Current analysis kept.",

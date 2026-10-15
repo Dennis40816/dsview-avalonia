@@ -18,12 +18,18 @@ internal static class AcquisitionWorkflowChecks
     private static Source Complete() => new((w,_,_) => { w.Running(); w.TryWrite(0,[0,0,0,0,128,128,128,128,0,0,0,0,128,128,128,128,0,0,0,0]); return Task.FromResult(AcquisitionTermination.Completed); });
     public static async Task RunAsync(Action<bool,string> check)
     {
-        var draft = new DemoClockDraft();
-        check(draft.TryCreate(out var settings)=="" && settings == new DemoClockSettings(0,1_000_000,1_000_000,50),
+        var draft = new DemoCaptureDraft();
+        check(draft.TryCreate(out var settings)=="" && settings == new DemoCaptureSettings(0,1_000_000,1_000_000,50),
             "Demo defaults define one second at 1 MS/s and a 10 kHz clock");
         draft.Frequency="333333"; check(draft.TryCreate(out _)!="", "Demo rejects a frequency that cannot fit the integer sample grid");
         draft.Frequency="10000"; draft.Duration="0.0001"; check(draft.TryCreate(out _)!="", "Demo cannot request a fractional or too-short sample capture");
         draft.Duration="1000"; draft.Channel="31"; check(draft.TryCreate(out settings)=="" && settings!.Channel==31,"Demo settings preserve physical channel D31");
+        draft.Scenario="I²C + Interrupt"; draft.DataChannel="4"; draft.InterruptChannel="9";
+        check(draft.TryCreate(out settings)=="" && settings is { I2c:true,Channel:31,DataChannel:4,InterruptChannel:9,HalfPeriod:50 },
+            "I2C scenario settings retain independent SCL, SDA and Interrupt mapping");
+        draft.DataChannel="31"; check(draft.TryCreate(out _)!="","I2C scenario rejects duplicated physical roles");
+        draft.DataChannel="4"; draft.Frequency="100000"; check(draft.TryCreate(out _)!="","I2C scenario requires four whole sample phases, not a rounded clock");
+        draft.Scenario="Unknown"; check(draft.TryCreate(out _)!="","Unknown Demo scenarios are not silently treated as clock captures");
 
         var model=Model(); var old=model.Capture; int published=0;
         await using (var vm=new AcquisitionViewModel(model,()=>true,()=>Task.FromResult(true),_=>published++,_=>Complete()))

@@ -9,6 +9,13 @@ int passed = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); Console.WriteLine("PASS " + name); passed++; }
 await AcquisitionWorkflowChecks.RunAsync(Check);
 if (args.Contains("--acquisition-workflow-only")) { Console.WriteLine($"{passed} acquisition workflow checks passed."); return; }
+if (args.Contains("--demo-workflow-only"))
+{
+    int config = Array.IndexOf(args,"--native-i2c");
+    if (config < 0) throw new ArgumentException("Native Demo workflow requires --native-i2c configuration.");
+    await NativeDemoWorkflowChecks.RunAsync(Check,args[config+1]);
+    Console.WriteLine($"{passed} Demo workflow checks passed."); return;
+}
 if (args.Contains("--decoder-workflow-only"))
 {
     await DecodeWorkflowChecks.RunAsync(Check);
@@ -261,6 +268,7 @@ int nativeOption = Array.IndexOf(args, "--native-i2c");
 if (nativeOption >= 0 && nativeOption + 1 >= args.Length) throw new ArgumentException("--native-i2c requires a configuration path.");
 await RawDecodeChecks.Run(Check, nativeOption < 0 ? null : args[nativeOption + 1]);
 await I2cChannelMapChecks.RunNativeAsync(Check, nativeOption < 0 ? null : args[nativeOption + 1]);
+if (nativeOption >= 0) await NativeDemoWorkflowChecks.RunAsync(Check, args[nativeOption + 1]);
 int importOption = Array.IndexOf(args, "--native-dsl");
 if (importOption >= 0 && importOption + 1 >= args.Length) throw new ArgumentException("--native-dsl requires a configuration path.");
 await DslImportChecks.RunAsync(Check, importOption < 0 ? null : args[importOption + 1]);

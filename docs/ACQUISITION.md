@@ -6,7 +6,7 @@ SPDX-License-Identifier: GPL-3.0-or-later
 # Capture acquisition lifecycle
 
 `AcquisitionSession` now provides a background acquisition pipeline and a paced
-raw clock Demo source. The App now wires it through an independent acquisition
+raw Clock and I2C + Interrupt Demo sources. The App wires them through an independent acquisition
 view model, setup pane and Start/Stop/Review action. Native UI interaction and
 layout acceptance are still pending. The native USB preparation component is not
 yet an acquisition source. Existing offline example loading remains separate.
@@ -72,15 +72,23 @@ segments with explicit level evidence/gaps remains future work. The same applies
 to continuous/repeated acquisition, trigger metadata, disk-backed storage and
 incremental rendering/decoding.
 
-## Clock Demo and checks
+## Demo scenarios and checks
 
 `DemoClockSource` generates raw clock samples for a chosen physical channel,
 sample rate/limit and integer half-period. It uses the same writer/session as
 future hardware adapters. Delivery is paced by batch duration and cancellation
 interrupts pending timers. Sub-millisecond delays may complete immediately under
 .NET timer resolution; sample positions and frequency always derive from the
-sample grid, never elapsed wall time. This is a finite clock scenario, not the
-complete I2C/SPI/UART Demo experience described in [DEMO-MODE.md](DEMO-MODE.md).
+sample grid, never elapsed wall time. Both sources share this small sample pump.
+
+`DemoI2cSource` generates SCL, SDA and active-low INT_N on three configurable
+physical channels. Each repeated transaction writes register 0x10 at address
+0x2A, issues a repeated START, reads 0x5A and 0xC3, then ends with NACK and STOP.
+The interrupt begins before START and ends after STOP. A quiet interval separates
+transactions. The App attaches the explicitly configured SCL/SDA roles, but no
+packets. **Decode I2C** sends the acquired signals through the existing decoder;
+it requires a configured native I2C runtime. This is an explicit action after
+publication, not continuous decoding. SPI/UART scenarios remain pending.
 
 The standalone checks depend only on Domain/Infrastructure, without Avalonia or
 native hardware runtimes:
@@ -93,20 +101,26 @@ dotnet <output>/bin/DSView.Acquisition.Checks/debug/DSView.Acquisition.Checks.dl
 They cover buffer reuse before any consumer runs, batch boundary transitions,
 D0/D31 among 32 channels, queue and transition limits, malformed input, empty and
 short data, marked partial outcomes, waiting for teardown, late results after
-abort, and the real clock source with manually advanced timers. Timing assertions
+abort, and both Demo sources with manually advanced timers. Timing assertions
 use independent sample positions; tests do not sleep for an expected duration.
 These are managed acquisition behavior checks, not App interaction or hardware
 acceptance. Additional checks in `DSView.Checks --acquisition-workflow-only` exercise
 the App owner, including source replacement, partial acceptance, pending edits and
-save/reopen. Native UI interaction, protocol scenarios, structured saved metadata
-and live display performance still require integration evidence.
+save/reopen. `--demo-workflow-only --native-i2c <configuration>` additionally
+checks actual I2C decoding, independent expected bytes/timestamps, cross-channel
+cursors, remapped pins/rate and a capture ending inside a byte. Acquisition may
+complete its requested sample count while its last protocol transaction remains
+incomplete; no trailing byte, NACK or STOP is invented. Native UI interaction,
+structured saved metadata and live display performance still require evidence.
 
 ## App workflow
 
-The header's **Demo** button opens Capture setup. It currently offers one Clock
-scenario with physical channel, sample rate, duration and clock frequency. The
+The header's **Demo** button opens Capture setup. It offers Clock and I2C + Interrupt
+scenarios with physical channels, sample rate, duration and clock frequency. The
 defaults request one second at 1 MS/s with a 10 kHz clock. Invalid or fractional
-sample timing cannot start. No USB device is presented as ready by this screen.
+sample timing cannot start. Switching scenarios preserves the entered timing.
+I2C requires three distinct channels and four whole sample intervals per cycle.
+No USB device is presented as ready by this screen.
 
 **Start** changes to **Stop** during acquisition. The existing waveform remains
 available for inspection. Completion validates a new analysis off-thread before
@@ -120,6 +134,7 @@ current analysis**. A retained result remains reachable through **Review** if th
 pane is closed. **Cancel acquisition** discards new samples and waits for producer
 cleanup. Closing the window with an active or pending acquisition asks before
 discarding it. File picker/save/replacement prompts inhibit automatic publication.
+Starting another acquisition is also inhibited while the shared decoder runs.
 
 The setup pane shares the existing right-side context area with decoder settings
 and packet details. It adds no permanent measurement row. A small header progress

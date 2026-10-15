@@ -75,7 +75,7 @@ public sealed partial class MainWindow : Window
         Title = "DSView2 · Offline demo"; Width = 1380; Height = 850; MinWidth = 1024; MinHeight = 650;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         _decoder = new(Model);
-        _acquisition = new(Model, () => !fileBusy && fileInteractionDepth == 0 && !replacementPrompt && !closePrompt && !_settingsView.Model.IsOpen && !NumericDraft && invalidTimes.Count == 0,
+        _acquisition = new(Model, () => !_decoder.IsRunning && !fileBusy && fileInteractionDepth == 0 && !replacementPrompt && !closePrompt && !_settingsView.Model.IsOpen && !NumericDraft && invalidTimes.Count == 0,
             ConfirmReplacementAsync, result =>
             {
                 analysisPath = null; importedPath = null; acquiredCapture = true;
@@ -83,6 +83,11 @@ public sealed partial class MainWindow : Window
                 baselineCapture = null; baselineState = null; renderedPacket = null; renderedIssue = null;
                 ResetNumericErrors(); waveScroll!.Offset = default; edgeChannel.SelectedItem = $"D{result.Plan.Channels[0].Id}";
                 Refresh(); UpdateSourceIdentity();
+            }, decodeRequested: id =>
+            {
+                ShowDecoders();
+                _decoder.Target = _decoder.Targets.FirstOrDefault(t => t.Source?.Id == id);
+                if (_decoder.DecodeCommand.CanExecute(null)) _ = _decoder.DecodeCommand.ExecuteAsync(null);
             });
         _acquisitionView = new() { DataContext = _acquisition, IsVisible = false };
         _decoderView = new() { DataContext = _decoder, IsVisible = false };
@@ -192,7 +197,11 @@ public sealed partial class MainWindow : Window
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
         hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(waveformGrid, Band(measurement), 1);
         WireAppearance(); Content = page; Model.Changed += Refresh;
-        _decoder.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DecoderViewModel.IsOpen)) Refresh(); };
+        _decoder.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(DecoderViewModel.IsOpen)) Refresh();
+            if (e.PropertyName == nameof(DecoderViewModel.IsRunning)) _acquisition.Poll();
+        };
         _acquisition.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName != nameof(AcquisitionViewModel.IsOpen)) return;
