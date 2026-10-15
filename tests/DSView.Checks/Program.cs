@@ -8,6 +8,8 @@ if (args.FirstOrDefault() == "--worker-lifetime-probe") { await NativeWorkerJobC
 if (args.Contains("--acquisition-profile")) { await AcquisitionProfile.RunAsync(); return; }
 int passed = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); Console.WriteLine("PASS " + name); passed++; }
+await AcquisitionPreviewChecks.RunAsync(Check);
+if (args.Contains("--acquisition-preview-only")) { Console.WriteLine($"{passed} acquisition preview checks passed."); return; }
 ChannelActivityCacheChecks.Run(Check);
 if (args.Contains("--channel-activity-only")) { Console.WriteLine($"{passed} channel activity checks passed."); return; }
 await AcquisitionWorkflowChecks.RunAsync(Check);

@@ -54,6 +54,9 @@ internal static class AcquisitionProfile
                     throw new InvalidOperationException("Profile ingress failed.");
             writer.Complete();return buffer.Count;
         },stages);
+        var preview=Measure("bounded-recent-preview",()=>buffer.Preview(Guid.Empty,new())!,stages);
+        if(preview.Signals.Any(s=>s.Edges.Count>2048) || preview.EndSample!=samples || preview.StartSample<0)
+            throw new InvalidOperationException("Profile preview exceeded its declared coverage or edge budget.");
         var raw=Measure("immutable-snapshot",()=>buffer.Snapshot(AcquisitionTermination.Completed)!,stages);
         buffer.Release();
         long expected=(samples/(long)halfPeriod-1)*channels;

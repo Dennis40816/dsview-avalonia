@@ -13,6 +13,8 @@ public sealed class AcquisitionSession : IAsyncDisposable
     private readonly CancellationTokenSource stop = new(), abort = new();
     private Task<AcquisitionResult>? task;
     private long retained;
+    private AcquisitionPreviewOptions? previewRequest;
+    private AcquisitionPreview? latestPreview;
     private bool disposed;
     public AcquisitionSession(IAcquisitionSource source, AcquisitionLimits? limits = null)
     {
@@ -23,6 +25,18 @@ public sealed class AcquisitionSession : IAsyncDisposable
     }
     public Guid Operation { get; } = Guid.NewGuid();
     public AcquisitionPlan Plan { get; }
+    public AcquisitionPreview? LatestPreview => Volatile.Read(ref latestPreview);
+    // One pending request, newest settings win. Only the consumer builds snapshots.
+    // Callers poll the immutable result; requesting never waits for source callbacks.
+    public bool RequestPreview(AcquisitionPreviewOptions? options = null)
+    {
+        options??=new();options.Validate();
+        lock(gate)
+        {
+            if(disposed || abort.IsCancellationRequested || task?.IsCompleted==true) return false;
+            Interlocked.Exchange(ref previewRequest,options);return true;
+        }
+    }
     public AcquisitionProgress Progress
     {
         get
@@ -37,7 +51,14 @@ public sealed class AcquisitionSession : IAsyncDisposable
         lock (gate) { ObjectDisposedException.ThrowIf(disposed, this); return task ??= Task.Run(RunCoreAsync); }
     }
     public void RequestStop() { lock (gate) { if (!disposed && task?.IsCompleted != true) stop.Cancel(); } }
-    public void Cancel() { lock (gate) { if (!disposed && task?.IsCompleted != true) { writer.Complete(); abort.Cancel(); } } }
+    public void Cancel()
+    {
+        lock(gate)
+        {
+            if(!disposed && task?.IsCompleted!=true) {writer.Complete();abort.Cancel();}
+            Interlocked.Exchange(ref previewRequest,null);Volatile.Write(ref latestPreview,null);
+        }
+    }
     private async Task<AcquisitionResult> RunCoreAsync()
     {
         var end = AcquisitionTermination.Failed; string detail = "";
@@ -67,6 +88,11 @@ public sealed class AcquisitionSession : IAsyncDisposable
                     stop.Cancel();
                 }
                 Interlocked.Exchange(ref retained, buffer.Count);
+                if(Interlocked.Exchange(ref previewRequest,null) is { } request)
+                {
+                    var snapshot=buffer.Preview(Operation,request);
+                    lock(gate) if(!disposed && !abort.IsCancellationRequested) Volatile.Write(ref latestPreview,snapshot);
+                }
             }
         }
         catch (Exception ex)
@@ -83,12 +109,17 @@ public sealed class AcquisitionSession : IAsyncDisposable
         Interlocked.Exchange(ref retained, retainedCount);
         var raw = end == AcquisitionTermination.Cancelled ? null : buffer.Snapshot(end);
         buffer.Release();
+        Interlocked.Exchange(ref previewRequest,null);
         return new(Operation, Plan, end, writer.Accepted, retainedCount, raw, detail);
     }
     public async ValueTask DisposeAsync()
     {
         Task<AcquisitionResult>? running;
-        lock (gate) { if (disposed) return; disposed = true; writer.Complete(); abort.Cancel(); running = task; }
+        lock (gate)
+        {
+            if(disposed) return;disposed=true;writer.Complete();abort.Cancel();running=task;
+            Interlocked.Exchange(ref previewRequest,null);Volatile.Write(ref latestPreview,null);
+        }
         if (running != null) await running.ConfigureAwait(false);
         stop.Dispose(); abort.Dispose();
     }

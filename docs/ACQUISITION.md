@@ -202,3 +202,33 @@ changes invalidate the labels, including missing-data status. The profile
 includes repeated cached/uncached label updates; native layout and drawing still
 need separate measurement. Source replacement releases old geometry references
 even when the replacement has no signal rows to draw.
+
+## Provisional preview contract
+
+`RequestPreview` records one pending request; repeated requests replace its
+settings. The acquisition consumer services it after processing a batch and
+publishes `LatestPreview` as an immutable reference. There is no per-batch UI event,
+additional producer task or snapshot queue. With no request, no preview is built.
+Callers must throttle requests (for example, to the UI's progress polling cadence).
+The UI has not yet connected this contract to a live waveform view.
+
+A preview contains absolute acquisition coordinates for `[StartSample, EndSample)`.
+It is display-only evidence, separate from analysis `Capture` and decoder inputs.
+It covers only the retained contiguous prefix, never samples merely accepted into
+the ingress queue. The default request asks for the most recent 65,536 samples
+with at most 2,048 edges per channel. Supported bounds are 1–1,000,000 samples
+and 1–8,192 edges per channel, across at most 32 physical channels.
+
+When a channel is denser than the edge budget, all channels share a later start
+and `WindowReduced` is true. Edges are not decimated or invented. Each signal's
+initial level is the observed level immediately before the preview start; an edge
+at that exact start remains in its edge collection. No level outside the declared
+window is implied. A quiet channel retains its known level at the common start.
+Copy work is bounded by the preview budgets and uses binary searches into the
+consumer-owned lists, without full-capture validation or snapshot copying.
+
+Cancellation and disposal clear pending/published previews and prevent late
+publication. Finished sessions reject new requests. An already held snapshot is
+immutable and must be discarded by the UI when its operation ID is no longer
+current. Preview reduction never alters retained samples or final publication.
+Stop/overflow/loss still follow the existing prefix and partial-acceptance policy.
