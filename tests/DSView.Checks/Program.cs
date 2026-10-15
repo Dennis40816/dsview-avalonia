@@ -10,6 +10,7 @@ await DisplayPreferencesChecks.RunAsync(Check);
 await AppearanceStorageChecks.RunAsync(Check);
 if (args.Contains("--display-preferences-only")) { Console.WriteLine($"{passed} appearance checks passed."); return; }
 CursorPlacementChecks.Run(Check);
+ChannelAppearanceChecks.Run(Check);
 if (args.Contains("--cursor-placement-only")) { Console.WriteLine($"{passed} appearance and cursor placement checks passed."); return; }
 var capture = await DemoCaptureSource.LoadAsync();
 var clock = capture.MeasureAt(0, 25025);

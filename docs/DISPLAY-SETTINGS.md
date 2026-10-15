@@ -32,15 +32,31 @@ Settings reports the fallback. Writes validate first and replace the destination
 from a temporary file in the same directory. Failed writes keep the prior saved
 preferences and leave the draft available for Retry or Cancel.
 
+## Channel appearance
+
+The line-color button beside a signal opens a local flyout. It identifies the
+physical channel/name and immutable probe color above a waveform preview,
+six presets and a six-digit Hex input. The draft affects only that preview.
+Apply updates the selected channel; Default removes its override only after
+Apply. Cancel or dismissal discards the draft. Invalid Hex or a replaced
+capture cannot receive the change. Color changes preserve raw samples,
+measurements and other channel colors. No new hardware controls are implied.
+
 ## Validation boundary
 
-The revised candidate has a successful solution build and 24 focused
-view-model, document-admission and isolated filesystem checks. Native visual and interaction acceptance is still required. In
+The candidate has a successful solution build and 308 checks, including 24
+appearance view-model, document-admission and isolated filesystem checks.
+Optional native decoder/import process checks were not run for this revision.
+Native visual and interaction acceptance is still required. In
 particular, verify 1024/1380/wide layouts at 100/125/150/200% display scaling,
 maximum text sizes, Group drawer/focus recovery, Settings Apply/Cancel/reopen,
 long signal names, empty states, packet inspector and repeated edge navigation.
 Do not count compilation or the visual preview as a usability pass.
 
-The larger A/B initial-placement redesign, channel editor, color-picker redesign
-and hardware capture controls remain open. The current draggable cursors still
-use the existing two-point initial placement and explicit edge/position modes.
+The A/B gesture now supports press-drag-release as well as two-click placement.
+Ten gesture checks cover signed cross-channel timing, cancellation and invalid
+release. The channel appearance draft has seven behavior checks covering
+cancel/reset, commit isolation, invalid input and source replacement. These
+checks do not cover native popup placement, focus, light dismissal, swatch
+visibility or pointer routing. Those paths still need actual App verification.
+Hardware capture controls and full single-channel configuration remain open.

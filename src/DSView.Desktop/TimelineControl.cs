@@ -48,12 +48,11 @@ public sealed class TimelineControl : Control
     private double visibleTop, visibleBottom = double.PositiveInfinity;
     private readonly List<(Rect Bounds, CaptureIssue Issue)> issueHits = [];
     public Canvas LabelControls { get; } = new() { Width = LabelWidth, HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Left };
-    public event Action<int>? ColorRequested;
+    public event Action<int, Control>? ColorRequested;
     public event Action<int>? EndpointRequested;
     public event Action? EditingCancelled;
     public event Action<bool>? KeyboardModeChanged;
     public event Action<double>? ScrollRowsRequested;
-    private static readonly string[] Probe = ["#505050", "#8F5202", "#CC0000", "#F57900", "#EDD400", "#73D216", "#3465A4", "#75507B"];
     public static IBrush Ink(string hex) => Brush.Parse(hex);
     private static readonly IBrush Text = Ink("#E4EAF0"), Muted = Ink("#9BAEBF"), Accent = Ink("#78D7C8"), Surface = Ink("#101820"), GridInk = Ink("#26343F");
     private static readonly Typeface Ui = new("fonts:Inter#Inter"), Mono = new("Cascadia Mono,Consolas");
@@ -122,7 +121,7 @@ public sealed class TimelineControl : Control
         if (!overview && !rulerOnly) RefreshColorButtons();
         InvalidateVisual();
     }
-    private IBrush SignalColor(int channel) => Ink(model.Colors.GetValueOrDefault(channel, channel == 0 ? "#D4AD00" : "#C7D2DB"));
+    private IBrush SignalColor(int channel) => Ink(model.Colors.GetValueOrDefault(channel, ChannelPalette.DefaultWaveform(channel)));
     private void RefreshColorButtons()
     {
         if (!ReferenceEquals(colorSignals, model.Signals))
@@ -134,10 +133,11 @@ public sealed class TimelineControl : Control
                 var swatch = new Border { Width = 12, Height = 4, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
                 var content = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Spacing = 3 };
                 content.Children.Add(swatch); content.Children.Add(new TextBlock { Text = "▾", FontSize = 9, Foreground = Muted });
-                var button = new Button { Content = content, Width = 30, Height = 28, MinHeight = 28, Padding = new Thickness(3), Background = Ink("#18242E"), BorderBrush = GridInk, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(3) };
+                var button = new Button { Content = content, Width = 30, Height = 28, MinHeight = 28, Padding = new Thickness(3) };
+                button.Classes.Add("flat");
                 AutomationProperties.SetName(button, $"D{channel} {signal.Name} waveform color");
                 ToolTip.SetTip(button, $"Waveform color · D{channel} {signal.Name}");
-                button.Click += (_, _) => ColorRequested?.Invoke(channel);
+                button.Click += (_, _) => ColorRequested?.Invoke(channel, button);
                 var activity = new TextBlock { FontSize = _appearance.TextSize - 2, Foreground = Muted, Width = 104, TextTrimming = TextTrimming.CharacterEllipsis };
                 Canvas.SetLeft(activity, 26); LabelControls.Children.Add(activity);
                 Canvas.SetLeft(button, 134); LabelControls.Children.Add(button); colorButtons[channel] = (button, swatch, activity);
@@ -317,7 +317,7 @@ public sealed class TimelineControl : Control
         {
             var y = SignalsTop + index * RowHeight;
             if (y + RowHeight < visibleTop || y > visibleBottom) continue;
-            context.FillRectangle(Ink(Probe[signal.Id % 8]), new(15, y + 16, 5, 20));
+            context.FillRectangle(Ink(ChannelPalette.Probe(signal.Id)), new(15, y + 16, 5, 20));
             Label(context, $"D{signal.Id}", 26, y + 8, Muted, 12);
             using (context.PushClip(new Rect(57, y, 73, RowHeight))) Label(context, signal.Name, 57, y + 7, Text, 13);
             IBrush color = SignalColor(signal.Id);

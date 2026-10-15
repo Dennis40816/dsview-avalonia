@@ -161,7 +161,11 @@ Explicit source/issue navigation can create a source Group if custom Groups no
 longer contain the decoder's required channels.
 
 The physical probe swatch is fixed. Click the separate short line beside a
-signal name to customize its waveform color. Group/color preferences are saved
+signal name to open its appearance panel beside that channel. Presets or a
+six-digit Hex color update a local waveform preview; Apply commits the color.
+Default also remains a draft until Apply. Cancel, Escape or clicking outside
+discards the draft. This panel changes display color, not acquisition settings.
+Group/color preferences are saved
 locally. Save analysis stores the capture, working measurement and kept results.
 
 Keep result copies a complete measurement. Results opens a compact list with

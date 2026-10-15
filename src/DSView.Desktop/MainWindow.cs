@@ -531,18 +531,16 @@ public sealed partial class MainWindow : Window
         var layout = new Grid { RowDefinitions = new("*,Auto") }; Add(layout, new ScrollViewer { Content = body, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }, 0); Add(layout, Band(footer), 1);
         dialog.Content = layout; dialog.Opened += (_, _) => name.Focus(); await dialog.ShowDialog(this);
     }
-    private async void EditColor(int channel)
+    private void EditColor(int channel, Control target)
     {
-        var dialog = new Window { Title = $"D{channel} waveform color", Width = 410, Height = 290, CanResize = false, WindowStartupLocation = WindowStartupLocation.CenterOwner };
-        var body = new StackPanel { Margin = new(20), Spacing = 14 }; body.Children.Add(Text($"D{channel} · waveform line"));
-        var input = new TextBox { Text = Model.Colors.GetValueOrDefault(channel, channel == 0 ? "#D4AD00" : "#C7D2DB"), PlaceholderText = "#RRGGBB" }; body.Children.Add(input);
-        AutomationProperties.SetName(input, "Waveform color hex value");
-        var presets = Row(); foreach (var hex in new[] { "#D4AD00", "#78D7C8", "#8BB7FF", "#E58C8C", "#C7D2DB" }) { var b = Button("", () => input.Text = hex, tip: hex); b.Background = TimelineControl.Ink(hex); b.Width = 42; presets.Children.Add(b); } body.Children.Add(presets);
-        var feedback = Text("Physical probe color stays unchanged.", true); feedback.TextWrapping = TextWrapping.Wrap; body.Children.Add(feedback);
-        var actions = Row(); actions.Children.Add(Button("Use default", () => { Model.Colors.Remove(channel); Model.Notify(); SavePreferences(); dialog.Close(); }));
-        var cancel = Button("Cancel", dialog.Close); cancel.IsCancel = true; actions.Children.Add(cancel);
-        var apply = Button("Apply", () => { if (Color.TryParse(input.Text, out var color)) { Model.Colors[channel] = color.ToString(); Model.Notify(); SavePreferences(); dialog.Close(); } else { feedback.Text = "Enter a valid color, for example #D4AD00."; feedback.Foreground = TimelineControl.Ink("#FF9AAA"); input.Focus(); } }, "primary"); apply.IsDefault = true; actions.Children.Add(apply); body.Children.Add(actions);
-        dialog.Content = body; await dialog.ShowDialog(this);
+        if (Model.Capture?.Signals.FirstOrDefault(s => s.Id == channel) is not { } signal) return;
+        openPanel?.Hide();
+        var editor = new ChannelAppearanceViewModel(Model, signal);
+        var panel = new Flyout { Content = new ChannelAppearanceView { DataContext = editor } };
+        panel.FlyoutPresenterClasses.Add("analysis");
+        editor.Applied += SavePreferences; editor.DismissRequested += panel.Hide;
+        panel.Closed += (_, _) => editor.Cancel();
+        openPanel = panel; panel.ShowAt(target);
     }
     private async void ShowInfo()
     {
