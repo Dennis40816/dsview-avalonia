@@ -25,8 +25,9 @@ The workbench supports one signal Group at a time, all-channel navigation,
 custom waveform colors, Hex packet details, local high/low pulse width and
 complete-cycle period/frequency, and cross-channel A/B edge or position timing.
 Analysis version 4 also stores capture-specific decoder channel roles; versions
-1–3 remain readable. Current-capture role selection and background decode UI
-are still being integrated.
+1–3 remain readable. With the optional native runtime configured, **Decoders**
+in the sidebar lets you select SCL/SDA and run or cancel background I²C decoding
+of the current capture. See [native I²C setup and limits](docs/NATIVE-I2C.md).
 The time ruler stays visible while scrolling channels. A local frequency is not
 a claim of a stable capture-wide clock.
 

@@ -23,6 +23,8 @@ public sealed partial class MainWindow : Window
     public Workbench Model { get; } = new();
     // New feature owners are UI-thread confined; legacy window state is tracked separately.
     private readonly WorkbenchShell _shell;
+    private readonly I2cDecoderViewModel _decoder;
+    private readonly I2cDecoderView _decoderView;
     private readonly SettingsView _settingsView = new(new LocalAppearanceStore()) { IsVisible = false };
     private readonly ComboBox modePicker = new() { ItemsSource = new[] { "Snap to edge", "Position" }, SelectedIndex = 0, Width = 134 };
     private readonly ComboBox edgeChannel = new() { Width = 74 };
@@ -70,7 +72,9 @@ public sealed partial class MainWindow : Window
     {
         Title = "DSView2 · Offline demo"; Width = 1380; Height = 850; MinWidth = 1024; MinHeight = 650;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        _shell = new(ShowActivity, () => _ = ShowTimingResultsAsync(), ShowIssues, ShowSettings);
+        _decoder = new(Model);
+        _decoderView = new() { DataContext = _decoder, IsVisible = false };
+        _shell = new(ShowActivity, () => _ = ShowTimingResultsAsync(), ShowIssues, ShowSettings, ShowDecoders);
         RestorePreferences();
         workspace.ColumnDefinitions[0].MinWidth = 480;
         var page = new Grid { RowDefinitions = new("52,*") };
@@ -143,7 +147,7 @@ public sealed partial class MainWindow : Window
         packets.SelectionChanged += (_, _) => { if (!updating && packets.SelectedItem is Packet packet) Model.Select(packet); };
         var work = new Grid(); work.Children.Add(wavePanel); work.Children.Add(packetPanel); Add(workspace, work, 0, 0); Add(workspace, splitter, 0, 1);
         inspectorBorder = new Border { BorderBrush = TimelineControl.Ink("#26343F"), BorderThickness = new(1, 0, 0, 0), Child = new ScrollViewer { Content = inspector, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled } };
-        Add(workspace, inspectorBorder, 0, 2); Add(center, workspace, 3);
+        Add(workspace, inspectorBorder, 0, 2); Add(workspace, _decoderView, 0, 2); Add(center, workspace, 3);
         Grid.SetColumn(center, 1); _shell.Body.Children.Insert(0, center);
         Add(page, _shell.Body, 1); Add(page, _settingsView, 1);
         SizeChanged += (_, _) => UpdateShellLayout();
@@ -175,11 +179,12 @@ public sealed partial class MainWindow : Window
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
         hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(waveformGrid, Band(measurement), 1);
         WireAppearance(); Content = page; Model.Changed += Refresh;
+        _decoder.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(I2cDecoderViewModel.IsOpen)) Refresh(); };
         Model.Changed += ScheduleTitleUpdate;
         titleUpdate.Tick += (_, _) => { titleUpdate.Stop(); UpdateAnalysisTitle(); };
         aTime.TextChanged += (_, _) => ScheduleTitleUpdate(); bTime.TextChanged += (_, _) => ScheduleTitleUpdate();
         Opened += async (_, _) => await LoadAsync(activeExample); Closing += ClosingAnalysis;
-        Closed += (_, _) => { titleUpdate.Stop(); loadCancellation?.Cancel(); ++generation; };
+        Closed += (_, _) => { _decoder.Dispose(); titleUpdate.Stop(); loadCancellation?.Cancel(); ++generation; };
         KeyDown += (_, e) =>
         {
             if (_settingsView.Model.IsOpen) { if (e.Key == Key.Escape && _settingsView.Model.CancelCommand.CanExecute(null)) { _settingsView.Model.CancelCommand.Execute(null); e.Handled = true; } return; }
@@ -189,6 +194,7 @@ public sealed partial class MainWindow : Window
             { e.Handled = true; _ = SaveAnalysisAsync(e.KeyModifiers.HasFlag(KeyModifiers.Shift)); return; }
             if (e.Key != Key.Escape) return;
             if (Model.Armed != null || aTime.IsFocused || bTime.IsFocused) { CancelEditing(); e.Handled = true; }
+            else if (_decoder.IsOpen) { _decoder.Close(); e.Handled = true; }
             else if (Model.Details) Model.ToggleDetails();
         };
         Refresh(); UpdateShellLayout();
@@ -209,9 +215,16 @@ public sealed partial class MainWindow : Window
     private void ShowSettings()
     {
         if (fileBusy) return;
+        _decoder.Close();
         openPanel?.Hide(); openPanel = null;
         var command = _settingsView.Model.IsOpen ? _settingsView.Model.CancelCommand : _settingsView.Model.OpenCommand;
         if (command.CanExecute(null)) command.Execute(null);
+    }
+    private void ShowDecoders()
+    {
+        if (fileBusy || _settingsView.Model.IsOpen) return;
+        openPanel?.Hide(); _shell.DismissCompact();
+        if (_decoder.IsOpen) _decoder.Close(); else _decoder.Open();
     }
     private void UpdateShellLayout()
     {
@@ -225,6 +238,7 @@ public sealed partial class MainWindow : Window
     private string SourceSummary(Capture capture) => $"{(analysisPath != null ? "Saved analysis · " + Path.GetFileName(analysisPath) : importedPath != null ? "Imported · " + CurrentSourceName : "Offline · " + activeExample.Name)} · {capture.SampleRate / 1e6:0.##} MS/s · {TimingText.Duration(capture.SampleCount / (double)capture.SampleRate)}" + (capture.Gaps.Count > 0 ? " · Missing data" : "") + " ▾";
     private async Task LoadAsync(DemoExample example)
     {
+        _decoder.Close();
         if (fileBusy || !await ConfirmReplacementAsync()) return;
         loadCancellation?.Cancel(); loadCancellation?.Dispose(); loadCancellation = new(); int current = ++generation;
         string showing = Model.Capture is { } loaded ? SourceSummary(loaded) : "No capture";
@@ -310,10 +324,12 @@ public sealed partial class MainWindow : Window
             foreach (string unit in new[] { "ns", "µs", "ms", "s", "Hz", "kHz", "MHz" }) delta.Text = delta.Text?.Replace(" " + unit, "\u00a0" + unit, StringComparison.Ordinal);
             ToolTip.SetTip(delta, Model.Armed != null ? Model.Hint : Model.PinnedMeasurement is { } m ? $"Local measurement · pulse samples {m.Pulse?.Start}–{m.Pulse?.End}\n" + (m.Cycle is { } cycle ? $"Cycle samples {cycle.Start}–{cycle.End}. This is a local cycle, not a capture-wide frequency." : m.Reason) : "Signed interval between A and B");
             ToolTip.SetTip(aSource, Model.A == null ? "" : $"Sample {Model.A.Sample} · {(Model.A.IsEdge ? "edge" : "position")}"); ToolTip.SetTip(bSource, Model.B == null ? "" : $"Sample {Model.B.Sample} · {(Model.B.IsEdge ? "edge" : "position")}");
-            bool showDetails = Model.Details && Model.Selected != null;
-            if (showDetails && workspace.ColumnDefinitions[2].Width.Value == 0) { workspace.ColumnDefinitions[1].Width = new(4); workspace.ColumnDefinitions[2].Width = new(320); }
-            if (!showDetails) { workspace.ColumnDefinitions[1].Width = new(0); workspace.ColumnDefinitions[2].Width = new(0); }
-            inspectorBorder.IsVisible = splitter.IsVisible = showDetails; detailButton.IsVisible = Model.Selected != null && !showDetails;
+            bool showDetails = Model.Details && Model.Selected != null && !_decoder.IsOpen;
+            bool showPanel = showDetails || _decoder.IsOpen;
+            if (showPanel && workspace.ColumnDefinitions[2].Width.Value == 0) { workspace.ColumnDefinitions[1].Width = new(4); workspace.ColumnDefinitions[2].Width = new(320); }
+            if (!showPanel) { workspace.ColumnDefinitions[1].Width = new(0); workspace.ColumnDefinitions[2].Width = new(0); }
+            _decoderView.IsVisible = _decoder.IsOpen;
+            inspectorBorder.IsVisible = showDetails; splitter.IsVisible = showPanel; detailButton.IsVisible = Model.Selected != null && !showDetails && !_decoder.IsOpen;
             if (showDetails && (!ReferenceEquals(renderedPacket, Model.Selected) || !ReferenceEquals(renderedIssue, Model.SelectedIssue) || renderedProtocolIndex != Model.SelectedProtocolIndex)) { RenderInspector(); renderedPacket = Model.Selected; renderedIssue = Model.SelectedIssue; renderedProtocolIndex = Model.SelectedProtocolIndex; }
             UpdateShellLayout();
             packetContext.Text = Model.PacketSelectionContext;

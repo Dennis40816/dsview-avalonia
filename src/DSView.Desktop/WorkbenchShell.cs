@@ -22,11 +22,12 @@ internal sealed class WorkbenchShell
     public Button Results { get; }
     public Button Issues { get; }
     public Button Settings { get; }
+    public Button Decoders { get; }
     public EdgeNavigationFlyout? Edges { get; private set; }
     private bool IsCompact => _mode is LayoutMode.CompactOpen or LayoutMode.CompactClosed;
     private bool IsOpen => _mode is LayoutMode.WideOpen or LayoutMode.CompactOpen;
 
-    public WorkbenchShell(Action activity, Action results, Action issues, Action settings)
+    public WorkbenchShell(Action activity, Action results, Action issues, Action settings, Action decoders)
     {
         Toggle = ActionIcons.Button("Show or hide Groups", ActionIcons.Groups, new RelayCommand(ToggleSidebar));
         _close = ActionIcons.Button("Close Groups", ActionIcons.Close, new RelayCommand(() => { _mode = LayoutMode.CompactClosed; Render(); Toggle.Focus(); }));
@@ -34,6 +35,7 @@ internal sealed class WorkbenchShell
         Activity = TextAction("Activity", activity); Results = TextAction("Results", results); Issues = TextAction("Capture issues", issues);
         Issues.Foreground = TimelineControl.Ink("#FF9AAA");
         Settings = ActionIcons.Button("Settings", ActionIcons.Settings, new RelayCommand(settings));
+        Decoders = TextAction("Decoders", decoders);
     }
     public void SetGroupContents(Action create, Action edit)
     {
@@ -45,7 +47,7 @@ internal sealed class WorkbenchShell
         Add(heading, _close, 0, 3); Add(body, heading, 0); Add(body, Groups, 1);
         var context = new StackPanel { Spacing = 6, Margin = new(0, 12, 0, 0) };
         context.Children.Add(new Separator());
-        foreach (var button in new[] { Activity, Results, Issues })
+        foreach (var button in new[] { Decoders, Activity, Results, Issues })
         {
             button.HorizontalAlignment = HorizontalAlignment.Stretch; button.HorizontalContentAlignment = HorizontalAlignment.Left;
             context.Children.Add(button);

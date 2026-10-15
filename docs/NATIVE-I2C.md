@@ -92,8 +92,34 @@ and diagnostic selections remain attached to current evidence.
 
 Tracks, Group scope and Locate use capture-specific roles. Analysis version 4
 stores them with the packet snapshot and restores without executing a decoder.
-The App still needs a role-selection/decode workflow with job generation and
-cancellation before users can run this against the current imported capture.
+The App provides a role-selection/decode workflow with job generation and
+cancellation for the current imported capture.
+
+Open **Decoders** in the Groups sidebar. The I²C panel temporarily occupies the
+packet inspector area. Choose distinct captured signals for SCL and SDA, then
+Decode. The job covers the full capture; zoom and Group membership do not trim
+its input. Existing I²C results are replaced only after success. Other protocols,
+raw signals, view and measurements remain. Show decoded signals explicitly
+reveals the mapped source Group without silently changing the user's Group.
+
+The independent `I2cDecoderViewModel` owns role drafts, commands and job lifetime.
+The compiled-binding view owns presentation. Changing source, closing the panel
+or starting a file operation cancels publication; even a late successful worker
+cannot replace a different source or a later generation. Only one job can run
+at a time. Window shutdown awaits the pending job's completion. Editing a cursor
+during a job prevents its result from publishing; finish the edit and decode again.
+Cancel and failure keep the previous committed analysis. A zero-packet success
+replaces previous I²C records with an empty result and suggests checking the roles.
+
+For an installed DSView logic demo with D1/SCL and D0/SDA, the opt-in checks can
+exercise import, this view model, native decode, Locate and save/reopen:
+
+```sh
+dotnet run --project tests/DSView.Checks --no-build -- --native-i2c /absolute/path/native-i2c.json --native-dsl /absolute/path/native-dsl.json --decode-capture /absolute/path/protocol.demo
+```
+
+This is programmatic integration evidence. It does not exercise native controls,
+prove hardware acquisition, or replace the owner's usability trial.
 
 The existing fixed-role `DecodeAsync` path replaces only the `i2c` records.
 It retains other protocol objects, raw signals, source description and capture
@@ -150,9 +176,9 @@ read NACK does not. No DemoFrame or private application-layer fields are inferre
 
 ## Scope still open
 
-This option does not provide hardware acquisition, capture-file import,
-gap-aware decoding, an App channel-role editor, other decoders, application
-stacking. Capture import and saved analysis are separate workbench paths; neither
+This option does not provide hardware acquisition, gap-aware decoding, multiple
+decoder instances, other decoders or application stacking. Capture import and
+saved analysis are separate workbench paths; neither
 automatically runs this decoder. The candidate native runtime
 patch has I²C-specific evidence; generic `wait`/`skip` and streaming behavior
 remain unverified. Official DSView output comparison and real-capture golden

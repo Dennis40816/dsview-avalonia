@@ -13,6 +13,7 @@ CursorPlacementChecks.Run(Check);
 ChannelAppearanceChecks.Run(Check);
 I2cChannelMapChecks.Run(Check);
 await DecoderSourceChecks.RunAsync(Check);
+await DecodeWorkflowChecks.RunAsync(Check);
 if (args.Contains("--cursor-placement-only")) { Console.WriteLine($"{passed} appearance and cursor placement checks passed."); return; }
 var capture = await DemoCaptureSource.LoadAsync();
 var clock = capture.MeasureAt(0, 25025);
@@ -236,5 +237,12 @@ await I2cChannelMapChecks.RunNativeAsync(Check, nativeOption < 0 ? null : args[n
 int importOption = Array.IndexOf(args, "--native-dsl");
 if (importOption >= 0 && importOption + 1 >= args.Length) throw new ArgumentException("--native-dsl requires a configuration path.");
 await DslImportChecks.RunAsync(Check, importOption < 0 ? null : args[importOption + 1]);
+int workflowOption = Array.IndexOf(args, "--decode-capture");
+if (workflowOption >= 0)
+{
+    if (workflowOption + 1 >= args.Length || nativeOption < 0 || importOption < 0)
+        throw new ArgumentException("--decode-capture requires a capture path and both --native-i2c and --native-dsl configurations.");
+    await NativeDecodeWorkflowChecks.RunAsync(Check, args[workflowOption + 1], args[importOption + 1], args[nativeOption + 1]);
+}
 if (args.Contains("--performance")) WorkScaling.Run(Check);
 Console.WriteLine($"{passed} focused checks passed.");

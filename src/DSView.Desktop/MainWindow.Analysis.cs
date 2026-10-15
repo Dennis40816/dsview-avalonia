@@ -80,6 +80,7 @@ public sealed partial class MainWindow
     private async Task OpenAnalysisAsync()
     {
         if (fileBusy || closePrompt) return;
+        _decoder.Close();
         try
         {
             var chosen = await StorageProvider.OpenFilePickerAsync(new() { Title = "Open DSView2 analysis", AllowMultiple = false, FileTypeFilter = [AnalysisType] });
@@ -121,6 +122,7 @@ public sealed partial class MainWindow
     private async Task<bool> SaveAnalysisAsync(bool saveAs)
     {
         if (fileBusy || Model.Capture == null) return false;
+        _decoder.Close();
         // Keyboard Save does not move focus; commit visible numeric input before taking a snapshot.
         if (aTime.IsFocused) CommitTime(0, aTime);
         if (bTime.IsFocused) CommitTime(1, bTime);
@@ -175,6 +177,7 @@ public sealed partial class MainWindow
     }
     private async void ClosingAnalysis(object? sender, WindowClosingEventArgs e)
     {
+        _decoder.Close();
         if (closeApproved) { SavePreferences(); return; }
         e.Cancel = true;
         if (closePrompt || _settingsView.Model.IsSaving) return;
@@ -182,6 +185,7 @@ public sealed partial class MainWindow
         closePrompt = true;
         try
         {
+            await _decoder.StopAsync();
             if (fileBusy) { loadCancellation?.Cancel(); await FileMessageAsync("Stopping file operation", "Close the window again after the file operation stops."); return; }
             if (await ConfirmReplacementAsync()) { closeApproved = true; Close(); }
         }

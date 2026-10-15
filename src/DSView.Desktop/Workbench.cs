@@ -158,6 +158,7 @@ public sealed partial class Workbench : ObservableObject
     }
     public void SetGroup(ObservationGroup group) { Group = group; if (Probe != null && !group.Channels.Contains(Probe.Channel)) Probe = null; if (!SelectionInGroup) Details = false; Notify(); }
     public void ShowAll() { PacketsTab = false; SetGroup(Groups.First(g => g.Name == "All signals")); }
+    public void ShowDecoderSource(string decoderId) { if (Capture == null) return; PacketsTab = false; SetGroup(SourceGroup(decoderId)); }
     public void ShowAllPackets() { Query = ""; PacketsTab = true; SetGroup(Groups.First(g => g.Name == "All signals")); }
     public void Select(Packet packet) { Selected = packet; SelectedIssue = null; SelectedProtocol = null; SelectedProtocolIndex = null; Details = true; Notify(); }
     public void SelectProtocol(Packet packet, int index)

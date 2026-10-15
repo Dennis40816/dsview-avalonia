@@ -12,6 +12,7 @@ public sealed partial class MainWindow
     private async Task ImportCaptureAsync()
     {
         if (fileBusy || closePrompt) return;
+        _decoder.Close();
         if (!NativeDslSource.IsConfigured)
         {
             await FileMessageAsync("Capture import unavailable", "This build does not include a configured DSView capture reader. You can still open saved DSView2 analyses."); return;

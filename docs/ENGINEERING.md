@@ -37,6 +37,16 @@ file, decoder or user-entered path chooses the appearance destination.
 
 ## Checks that protect behavior
 
+`I2cDecoderViewModel` owns the current-capture decoder workflow: role draft,
+commands, source identity, cancellation and generation. Its injected worker
+delegate is an asynchronous IO boundary, not a second capture owner. Workbench
+alone commits validated results and preserves measurements. The window only
+opens the panel and cancels/drains work at file and shutdown boundaries. New
+decode controls use compiled bindings and share the existing inspector area.
+Controlled completions test stale output, cancel, retry, disposal, pending edits
+and shutdown without sleeps. Optional real worker checks cover imported data
+through decode and persistence, separately from native UI acceptance.
+
 Use independent fixtures and public/internal application contracts. Do not
 compare implementation source, assert private members, or copy the algorithm
 under test into its expected result. Cases should report one behavior and have
