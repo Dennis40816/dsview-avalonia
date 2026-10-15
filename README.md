@@ -131,8 +131,12 @@ has no packets, or the search has no matches. Filtered-out selections remain
 available in the inspector with their scope identified.
 
 Start with a Group or All signals. Hover a pulse to preview timing; click to pin
-it. Use Cursor A/B to choose two references, or choose Position for sample-grid
-locations. Escape cancels a pending selection or numeric edit. The wheel zooms
+it. Choose Cursor A/B, press on A and drag to B on the same or another signal.
+Release commits the interval; clicking A then B also works. Choose Position for
+sample-grid locations instead of edge snapping. Releasing a new pair outside a
+signal or away from a valid edge restores the prior measurement. Escape or lost
+pointer capture cancels the drag. The wheel does not change the view during a
+drag. Escape also cancels a pending selection or numeric edit. The wheel zooms
 around the pointer over the waveform or ruler, without requiring Ctrl. Shift +
 wheel scrolls signal rows; the channel-label rail also retains ordinary vertical
 scrolling. Dragging empty waveform space pans. Select a packet for its content;

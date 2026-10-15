@@ -209,7 +209,8 @@ public sealed partial class Workbench : ObservableObject
         var source = new ObservationGroup(name, decoder.Channels, [decoderId]); Groups.Insert(Math.Max(0, Groups.Count - 1), source); return source;
     }
     private void BeginEdit() { editOrigin ??= (A, B, Mode, PinnedMeasurement); }
-    public void SetMode(int mode) { BeginEdit(); selectingPair = mode != 0; Mode = mode; if (Mode == 2 && Probe != null) Probe = Probe with { IsEdge = false }; Armed = mode == 0 ? null : 0; Hint = mode == 0 ? "" : "Choose A, then B on any signal. Esc cancels."; Notify(); }
+    internal bool IsChoosingPair => selectingPair && Armed == 0;
+    public void SetMode(int mode) { BeginEdit(); selectingPair = mode != 0; Mode = mode; if (Mode == 2 && Probe != null) Probe = Probe with { IsEdge = false }; Armed = mode == 0 ? null : 0; Hint = mode == 0 ? "" : "Drag from A to B, or click each endpoint. Esc cancels."; Notify(); }
     public void SetSnapMode(int mode) { Mode = mode == 2 ? 2 : 1; if (Probe != null) PlaceProbe(Capture!.Signals.First(s => s.Id == Probe.Channel), Probe.Sample); Notify(); }
     public void Arm(int endpoint) { BeginEdit(); selectingPair = false; if (Mode == 0) Mode = 1; Armed = endpoint; Hint = $"Choose {(endpoint == 0 ? "A" : "B")} on any signal. Esc cancels."; Notify(); }
     public void CancelPick()
@@ -275,22 +276,22 @@ public sealed partial class Workbench : ObservableObject
             MeasurementFocusRequested?.Invoke([probe.Channel]);
         }
     }
-    public void Pick(int channel, long sample, double tolerance, int? replacing = null)
+    public bool Pick(int channel, long sample, double tolerance, int? replacing = null)
     {
         var signal = Capture?.Signals.FirstOrDefault(s => s.Id == channel);
-        if (signal == null) return;
+        if (signal == null) return false;
         if (Mode == 0 && replacing == null)
         {
             var measurement = Capture!.MeasureAt(channel, sample);
-            if (measurement.Pulse is not { } pulse) { Hint = $"D{channel} · {measurement.Reason}."; Notify(); return; }
+            if (measurement.Pulse is not { } pulse) { Hint = $"D{channel} · {measurement.Reason}."; Notify(); return false; }
             PinnedMeasurement = measurement; A = new(channel, pulse.Start, true); B = new(channel, pulse.End, true);
-            editOrigin = null; Hint = ""; Notify(); MeasurementFocusRequested?.Invoke([channel]); return;
+            editOrigin = null; Hint = ""; Notify(); MeasurementFocusRequested?.Invoke([channel]); return true;
         }
         int? target = replacing ?? Armed;
-        if (target == null) { Hint = "Choose A or B to replace an endpoint, or drag an existing cursor."; Notify(); return; }
+        if (target == null) { Hint = "Choose A or B to replace an endpoint, or drag an existing cursor."; Notify(); return false; }
         var edge = Capture!.NearestObservedEdge(signal, sample);
         if (Mode != 2 && (edge == null || Math.Abs(edge.Sample - sample) > tolerance || edge.Sample < Start || edge.Sample > End))
-        { Hint = "No nearby edge. Zoom in or use A/B position."; Notify(); return; }
+        { Hint = "No nearby edge. Zoom in or use A/B position."; Notify(); return false; }
         if (replacing != null && Mode == 0) Mode = 1;
         PinnedMeasurement = null;
         var point = new Endpoint(channel, Mode == 2 ? Math.Clamp(sample, 0, Capture!.SampleCount - 1) : edge!.Sample, Mode != 2);
@@ -299,6 +300,7 @@ public sealed partial class Workbench : ObservableObject
         if (Armed == null && !draggingEndpoint) { editOrigin = null; selectingPair = false; }
         Hint = Armed == 1 ? "A set. Choose B on any signal. Esc cancels." : "";
         Notify();
+        return true;
     }
     public bool EditEndpoint(int index, double microseconds)
     {

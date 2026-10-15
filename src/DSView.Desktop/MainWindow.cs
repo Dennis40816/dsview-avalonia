@@ -84,7 +84,7 @@ public sealed partial class MainWindow : Window
         Add(page, Band(header), 0);
         waveTab = Button("Waveforms", () => Model.SetTab(false), "flat"); packetTab = Button("Packets", () => Model.SetTab(true), "flat"); waveTab.Classes.Add("tab"); packetTab.Classes.Add("tab");
         detailButton = IconButton("Packet details", ActionIcons.Details, Model.ToggleDetails);
-        measureButton = Button("Cursor A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Choose two edges or positions, then drag either cursor to adjust it");
+        measureButton = Button("Cursor A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Drag from A to B, or click two endpoints. Then drag either cursor to refine it.");
         _shell.Groups.ItemsSource = Model.Groups; _shell.Groups.SelectedItem = Model.Group;
         _shell.Groups.ItemTemplate = new FuncDataTemplate<ObservationGroup>((group, _) => { var text = Text(group?.Name ?? ""); text.TextTrimming = TextTrimming.CharacterEllipsis; ToolTip.SetTip(text, group?.Name); return text; });
         AutomationProperties.SetName(_shell.Groups, "Signal Groups");

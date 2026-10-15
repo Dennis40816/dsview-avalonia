@@ -15,6 +15,7 @@ public sealed class TimelineControl : Control
 {
     public const double LabelWidth = 168, RowHeight = 52;
     private readonly Workbench model;
+    private readonly CursorPlacementGesture placement;
     private readonly bool overview;
     private readonly bool rulerOnly;
     private DisplayPreferences _appearance = DisplayPreferences.Default;
@@ -58,18 +59,19 @@ public sealed class TimelineControl : Control
     private static readonly Typeface Ui = new("fonts:Inter#Inter"), Mono = new("Cascadia Mono,Consolas");
     public TimelineControl(Workbench workbench, bool isOverview = false, bool isRuler = false)
     {
-        model = workbench; overview = isOverview; rulerOnly = isRuler; ClipToBounds = true; Focusable = true; VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
+        model = workbench; placement = new(workbench); overview = isOverview; rulerOnly = isRuler; ClipToBounds = true; Focusable = true; VerticalAlignment = Avalonia.Layout.VerticalAlignment.Top;
         if (overview) ToolTip.SetTip(this, "Observed raw transitions in this Group across the full capture. Flags mark this Group's diagnostic evidence. Click the map to move the time view; use Capture issues to locate a diagnostic.");
         model.Changed += Refresh;
         Refresh();
         PointerPressed += Pressed; PointerMoved += Moved; PointerReleased += Released;
-        PointerCaptureLost += (_, _) => { if (down && dragged && dragEndpoint != null) model.CancelPick(); down = false; dragEndpoint = null; activePointer = null; };
+        PointerCaptureLost += (_, _) => { if (down) { placement.Cancel(); if (dragged && dragEndpoint != null) model.CancelPick(); } down = false; dragEndpoint = null; activePointer = null; };
         KeyDown += Keyboard;
         GotFocus += (_, e) => { if (!overview && !rulerOnly && e.NavigationMethod == NavigationMethod.Tab) { model.FocusProbe(); SetKeyboardMode(true); } };
         LostFocus += (_, _) => SetKeyboardMode(false);
         PointerExited += (_, _) => { if (!down) { hoverChannel = null; InvalidateVisual(); } };
         PointerWheelChanged += (_, e) =>
         {
+            if (down) { e.Handled = true; return; }
             var x = e.GetPosition(this).X;
             if (overview || model.Capture == null || x < LabelWidth || x > LabelWidth + PlotWidth || e.Delta.Y == 0) return;
             if (e.KeyModifiers == KeyModifiers.Shift)
@@ -91,7 +93,7 @@ public sealed class TimelineControl : Control
         if (e.Key == Key.Escape)
         {
             if (!down && model.Armed == null && !keyboardMode) return;
-            down = false; dragEndpoint = null; activePointer?.Capture(null); activePointer = null;
+            placement.Cancel(); down = false; dragEndpoint = null; activePointer?.Capture(null); activePointer = null;
             if (EditingCancelled != null) EditingCancelled(); else model.CancelPick();
             SetKeyboardMode(false); e.Handled = true; return;
         }
@@ -491,7 +493,16 @@ public sealed class TimelineControl : Control
         }
         if (!down) { InvalidateVisual(); return; }
         if (!ReferenceEquals(pressCapture, model.Capture)) { down = false; e.Pointer.Capture(null); return; }
-        if (armedOnPress != null) { InvalidateVisual(); return; }
+        if (armedOnPress != null)
+        {
+            if (!dragged && model.IsChoosingPair && (Math.Abs(p.X - press.X) > 4 || Math.Abs(p.Y - press.Y) > 4))
+            {
+                dragged = true;
+                if (ChannelAt(press.Y) is int first) placement.Begin(first, Sample(press.X), (model.End - model.Start) / PlotWidth * 8);
+            }
+            if (placement.IsActive && hoverChannel is int channel) placement.Move(channel, hoverSample, (model.End - model.Start) / PlotWidth * 8);
+            InvalidateVisual(); return;
+        }
         if (!dragged && Math.Abs(p.X - press.X) > 4) { dragged = true; if (dragEndpoint == null) model.Remember(); else model.BeginDrag(); }
         if (!dragged) return;
         if (dragEndpoint is int target)
@@ -509,7 +520,9 @@ public sealed class TimelineControl : Control
         if (!ReferenceEquals(pressCapture, model.Capture)) { dragEndpoint = null; return; }
         if (armedOnPress != null)
         {
-            if (model.Armed == armedOnPress && p.X >= LabelWidth && p.X <= LabelWidth + PlotWidth && ChannelAt(p.Y) is int chosen)
+            if (placement.IsActive)
+                placement.Complete(p.X >= LabelWidth && p.X <= LabelWidth + PlotWidth ? ChannelAt(p.Y) : null, Sample(p.X), (model.End - model.Start) / PlotWidth * 8);
+            else if (!dragged && model.Armed == armedOnPress && p.X >= LabelWidth && p.X <= LabelWidth + PlotWidth && ChannelAt(p.Y) is int chosen)
                 model.Pick(chosen, Sample(p.X), (model.End - model.Start) / PlotWidth * 8);
         }
         else if (dragged && finishedDrag != null) model.FinishDrag();
