@@ -52,11 +52,9 @@ public sealed partial class MainWindow
     private void SetOpening(bool opening)
     {
         openingFile = opening;
-        // Keep File/Cancel available while preventing new analysis from being replaced by an in-flight load.
-        if (Content is not Grid page) return;
-        foreach (var child in page.Children)
-            if (Grid.GetRow(child) > 0) child.IsEnabled = !opening;
-            else if (child is Border { Child: Grid header }) foreach (var control in header.Children.Where(c => !ReferenceEquals(c, reloadButton))) control.IsEnabled = !opening;
+        _shell.Body.IsEnabled = !opening;
+        foreach (var control in _shell.Header.Children)
+            control.IsEnabled = !opening || ReferenceEquals(control, reloadButton);
     }
     private void ShowFiles()
     {
@@ -179,7 +177,8 @@ public sealed partial class MainWindow
     {
         if (closeApproved) { SavePreferences(); return; }
         e.Cancel = true;
-        if (closePrompt) return;
+        if (closePrompt || _settingsView.Model.IsSaving) return;
+        if (_settingsView.Model.CancelCommand.CanExecute(null)) _settingsView.Model.CancelCommand.Execute(null);
         closePrompt = true;
         try
         {

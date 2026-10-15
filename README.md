@@ -38,6 +38,18 @@ time view. Capture issues lists diagnostics by their reported decoder layer;
 Locate issue frames its evidence while retaining timing markers. The overview
 shows observed raw transitions in the current Group, including control signals.
 
+Groups, activity and kept results are in the left sidebar; File, capture source
+and Settings stay in the header. Settings previews and saves interface/data text
+size, waveform thickness and wheel direction, with Apply/Cancel. See
+[display settings](docs/DISPLAY-SETTINGS.md) for behavior and pending native QA.
+
+The product scope includes existing DSView capabilities. The first hardware demo
+target is tentatively DSLogic Plus, not yet connected or verified. See the
+[source-backed parity inventory](docs/DSVIEW-PARITY.md) for current gaps, library
+reuse and delivery gates; source availability is not integrated device support.
+
+Development boundaries and test intent are documented in [engineering](docs/ENGINEERING.md).
+
 ## Run the offline workbench
 
 Use the .NET SDK pinned by `global.json` (10.0.303, with latest-patch roll-forward):

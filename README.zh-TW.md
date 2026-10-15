@@ -28,6 +28,16 @@ Activity 可比較全部已擷取通道在整段資料與目前視野的活動�
 Capture issues 依回報的解析層列出異常；Locate issue 定位其證據並保留量測標記。
 總覽顯示目前 Group 的原始訊號變化，包含未解析的控制訊號。
 
+Group、活動與量測結果集中在左側；檔案、資料來源與 Settings 留在上方。
+Settings 可預覽、套用或取消介面／資料字級、波形粗度與滾輪方向；原生視覺操作仍待驗證。
+詳見 [顯示設定](docs/DISPLAY-SETTINGS.md)。
+
+開發範圍涵蓋 DSView 既有能力。第一台實機暫定 DSLogic Plus，目前未接機、未確認型號。
+[功能對照表](docs/DSVIEW-PARITY.md) 記錄來源、差距、函式庫重用及驗收順序；
+有上游原始碼不代表已接入或已通過實機測試。
+
+實作責任與測試原則見 [開發說明](docs/ENGINEERING.md)。
+
 ## 執行離線工作區
 
 使用 `global.json` 指定的 .NET SDK（10.0.303，允許最新 patch）：

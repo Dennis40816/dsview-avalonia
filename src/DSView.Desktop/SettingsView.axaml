@@ -1,0 +1,43 @@
+<!-- SPDX-FileCopyrightText: 2026 Dennis40816; SPDX-License-Identifier: GPL-3.0-or-later -->
+<UserControl xmlns="https://github.com/avaloniaui" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:DSView.Desktop" x:Class="DSView.Desktop.SettingsView"
+             x:DataType="local:AppearanceSettingsViewModel" x:CompileBindings="True"
+             Background="#131D27">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="28,22" IsEnabled="{Binding !IsSaving}">
+    <StackPanel Orientation="Horizontal" Spacing="12">
+      <Button Classes="flat" Command="{Binding CancelCommand}" ToolTip.Tip="Back to analysis" AutomationProperties.Name="Back to analysis">
+        <Path Data="M10,3 L5,8 L10,13 M5,8 L15,8" Width="18" Height="18" Stretch="Uniform" Stroke="#C7D2DB" StrokeThickness="1.6" />
+      </Button>
+      <TextBlock Text="Settings" FontSize="{DynamicResource HeadingFontSize}" FontWeight="SemiBold" VerticalAlignment="Center" />
+    </StackPanel>
+    <ScrollViewer Grid.Row="1" Margin="0,26" HorizontalScrollBarVisibility="Disabled">
+      <Grid ColumnDefinitions="*,32,320">
+        <StackPanel Spacing="16">
+          <TextBlock Text="Appearance" FontWeight="SemiBold" />
+          <TextBlock Text="{Binding TextSize, StringFormat='Interface text size · {0:0}'}" />
+          <Slider Minimum="12" Maximum="16" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding TextSize, Mode=TwoWay}" AutomationProperties.Name="Interface text size" />
+          <TextBlock Text="{Binding DataTextSize, StringFormat='Data text size · {0:0}'}" />
+          <Slider Minimum="12" Maximum="18" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding DataTextSize, Mode=TwoWay}" AutomationProperties.Name="Data text size" />
+          <TextBlock Text="{Binding WaveformThickness, StringFormat='Waveform thickness · {0:0.##}'}" />
+          <Slider Minimum="1" Maximum="3" TickFrequency="0.05" IsSnapToTickEnabled="True" Value="{Binding WaveformThickness, Mode=TwoWay}" AutomationProperties.Name="Waveform thickness" />
+          <Separator />
+          <TextBlock Text="Interaction" FontWeight="SemiBold" />
+          <CheckBox Content="Reverse wheel zoom direction" IsChecked="{Binding ReverseWheel, Mode=TwoWay}" />
+          <TextBlock Text="Wheel zooms at the pointer. Shift + wheel scrolls signals." TextWrapping="Wrap" Foreground="#9BAEBF" />
+        </StackPanel>
+        <StackPanel Grid.Column="2" Spacing="14">
+          <local:AppearancePreview Preferences="{Binding Current}" />
+          <TextBlock Text="Preview" Foreground="#9BAEBF" />
+        </StackPanel>
+      </Grid>
+    </ScrollViewer>
+    <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto">
+      <StackPanel Spacing="8">
+        <Button Classes="flat" Content="Restore defaults" Command="{Binding RestoreDefaultsCommand}" HorizontalAlignment="Left" />
+        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" Foreground="#FF9AAA" />
+      </StackPanel>
+      <Button Grid.Column="1" Classes="flat" Content="Cancel" Command="{Binding CancelCommand}" />
+      <Button Grid.Column="2" Classes="primary" Content="Apply" Command="{Binding ApplyCommand}" Margin="10,0,0,0" />
+    </Grid>
+  </Grid>
+</UserControl>

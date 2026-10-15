@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using DSView.Domain;
+using DSView.Infrastructure;
 
 namespace DSView.Desktop;
 
@@ -16,6 +17,13 @@ public sealed class TimelineControl : Control
     private readonly Workbench model;
     private readonly bool overview;
     private readonly bool rulerOnly;
+    private DisplayPreferences _appearance = DisplayPreferences.Default;
+    public void ApplyAppearance(DisplayPreferences value)
+    {
+        _appearance = value;
+        foreach (var item in colorButtons.Values) item.Activity.FontSize = value.TextSize - 2;
+        InvalidateVisual();
+    }
     private readonly List<(Rect Bounds, Packet Packet, int? Index)> hits = [];
     private Point press;
     private double pressStart, pressEnd;
@@ -69,7 +77,7 @@ public sealed class TimelineControl : Control
                 ScrollRowsRequested?.Invoke(-e.Delta.Y * RowHeight * 3); e.Handled = true; return;
             }
             if (e.KeyModifiers is not (KeyModifiers.None or KeyModifiers.Control)) return;
-            model.Zoom(Math.Pow(1.25, -Math.Clamp(e.Delta.Y, -5, 5)), (x - LabelWidth) / PlotWidth);
+            model.Zoom(Math.Pow(1.25, (_appearance.ReverseWheel ? 1 : -1) * Math.Clamp(e.Delta.Y, -5, 5)), (x - LabelWidth) / PlotWidth);
             e.Handled = true;
         };
     }
@@ -128,7 +136,7 @@ public sealed class TimelineControl : Control
                 AutomationProperties.SetName(button, $"D{channel} {signal.Name} waveform color");
                 ToolTip.SetTip(button, $"Waveform color · D{channel} {signal.Name}");
                 button.Click += (_, _) => ColorRequested?.Invoke(channel);
-                var activity = new TextBlock { FontSize = 11, Foreground = Muted, Width = 104, TextTrimming = TextTrimming.CharacterEllipsis };
+                var activity = new TextBlock { FontSize = _appearance.TextSize - 2, Foreground = Muted, Width = 104, TextTrimming = TextTrimming.CharacterEllipsis };
                 Canvas.SetLeft(activity, 26); LabelControls.Children.Add(activity);
                 Canvas.SetLeft(button, 134); LabelControls.Children.Add(button); colorButtons[channel] = (button, swatch, activity);
             }
@@ -320,7 +328,7 @@ public sealed class TimelineControl : Control
                     {
                         foreach (var band in trace.Dense) context.FillRectangle(color, band);
                     }
-                    context.DrawGeometry(null, new Pen(color, 1.35), trace.Geometry);
+                    context.DrawGeometry(null, new Pen(color, _appearance.WaveformThickness), trace.Geometry);
                 }
                 foreach (var unknown in model.Capture.UnknownLevelSpans(signal))
                 {
@@ -340,7 +348,7 @@ public sealed class TimelineControl : Control
                     // Draw that edge explicitly without inventing its preceding stable interval.
                     int recovery = signal.LowerBound(unknown.End);
                     if (recovery < signal.Edges.Count && signal.Edges[recovery].Sample == unknown.End && unknown.End >= model.Start && unknown.End <= model.End)
-                        context.DrawLine(new Pen(color, 1.35), new(X(unknown.End), y + 16), new(X(unknown.End), y + 35));
+                        context.DrawLine(new Pen(color, _appearance.WaveformThickness), new(X(unknown.End), y + 16), new(X(unknown.End), y + 35));
                 }
             }
         }
@@ -455,8 +463,8 @@ public sealed class TimelineControl : Control
         }
         context.DrawRectangle(null, new Pen(Accent, 2), window);
     }
-    private static FormattedText Format(string value, IBrush brush, double size, bool mono = false) => new(value, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, mono ? Mono : Ui, size, brush);
-    private static void Label(DrawingContext c, string value, double x, double y, IBrush brush, double size = 13) => c.DrawText(Format(value, brush, size), new(x, y));
+    private FormattedText Format(string value, IBrush brush, double size, bool mono = false) => new(value, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, mono ? Mono : Ui, size * (mono ? _appearance.DataTextSize : _appearance.TextSize) / 13, brush);
+    private void Label(DrawingContext c, string value, double x, double y, IBrush brush, double size = 13) => c.DrawText(Format(value, brush, size), new(x, y));
     private void Pressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || model.Capture == null) return;

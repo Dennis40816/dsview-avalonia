@@ -99,7 +99,7 @@ public sealed partial class MainWindow
         }
         list.SelectionChanged += (_, _) => { message.Text = ""; Render(); };
         dialog.Content = layout; Reload(null); dialog.Opened += (_, _) => list.Focus();
-        await dialog.ShowDialog(this); if (shown) waveTab.Focus(); else if (resultsButton.IsVisible) resultsButton.Focus(); else measureButton.Focus();
+        await dialog.ShowDialog(this); if (shown) waveTab.Focus(); else if (_shell.Results.IsVisible) _shell.Results.Focus(); else measureButton.Focus();
     }
     private async Task<bool> EditTimingResultAsync(Window owner, TimingResult result)
     {

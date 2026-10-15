@@ -6,6 +6,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using DSView.Domain;
 
@@ -73,12 +74,16 @@ public sealed partial class MainWindow
                     Model.SelectProtocol(packet, protocolIndex);
                     if (byteButtons.TryGetValue(dataIndex, out var current)) current.Focus();
                 }, "flat", $"Data byte {i + 1} · select decoded source");
-                button.MinWidth = 34; button.Padding = new(6, 5); button.Margin = new(0, 0, 2, 2); button.FontFamily = new("Cascadia Mono,Consolas");
+                button.MinWidth = 34; button.Padding = new(6, 5); button.Margin = new(0, 0, 2, 2); button.FontFamily = new("Cascadia Mono,Consolas"); button.Bind(FontSizeProperty, new DynamicResourceExtension("DataFontSize"));
                 AutomationProperties.SetName(button, $"Select data byte {i + 1} · 0x{packet.Bytes[i]:X2}");
                 if (Model.SelectedProtocolIndex == protocolIndex) { button.Background = TimelineControl.Ink("#245A53"); button.BorderBrush = TimelineControl.Ink("#78D7C8"); button.BorderThickness = new(0, 0, 0, 2); }
                 byteButtons.Add(i, button); bytes.Children.Add(button);
             }
-            else bytes.Children.Add(new SelectableTextBlock { Text = packet.Bytes[i].ToString("X2"), FontFamily = new("Cascadia Mono,Consolas"), Margin = new(6, 5, 8, 7) });
+            else
+            {
+                var value = new SelectableTextBlock { Text = packet.Bytes[i].ToString("X2"), FontFamily = new("Cascadia Mono,Consolas"), Margin = new(6, 5, 8, 7) };
+                value.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("DataFontSize")); bytes.Children.Add(value);
+            }
         }
         inspector.Children.Add(bytes);
         if (byteButtons.Count > 0) packetContentFocus = byteButtons.Values.First();

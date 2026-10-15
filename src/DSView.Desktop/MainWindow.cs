@@ -9,8 +9,10 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.Markup.Xaml.MarkupExtensions;
 using Avalonia.Media;
 using Avalonia.Threading;
+using CommunityToolkit.Mvvm.Input;
 using DSView.Domain;
 using DSView.Infrastructure;
 
@@ -19,7 +21,9 @@ namespace DSView.Desktop;
 public sealed partial class MainWindow : Window
 {
     public Workbench Model { get; } = new();
-    private readonly ComboBox groupPicker = new() { MinWidth = 205 };
+    // New feature owners are UI-thread confined; legacy window state is tracked separately.
+    private readonly WorkbenchShell _shell;
+    private readonly SettingsView _settingsView = new(new LocalAppearanceStore()) { IsVisible = false };
     private readonly ComboBox modePicker = new() { ItemsSource = new[] { "Snap to edge", "Position" }, SelectedIndex = 0, Width = 134 };
     private readonly ComboBox edgeChannel = new() { Width = 74 };
     private readonly TextBlock range = Text(""), status = Text("Loading…", true), hint = Text("", true), delta = Text("");
@@ -37,17 +41,17 @@ public sealed partial class MainWindow : Window
     private readonly StackPanel inspector = new() { Spacing = 14, Margin = new Thickness(16) };
     private readonly StackPanel measurement = new() { Spacing = 6, Margin = new(16, 4) };
     private readonly StackPanel measurementActions = Row();
-    private readonly Grid navigation = new() { ColumnDefinitions = new("Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"), Margin = new(16, 0), Height = 38 };
+    private readonly Grid navigation = new() { ColumnDefinitions = new("Auto,Auto,*,Auto,Auto"), Margin = new(12, 0), MinHeight = 38 };
     private readonly TimelineControl overview, timeline, ruler;
     private readonly Dictionary<TextBox, string> invalidTimes = [];
     private readonly Grid workspace = new() { ColumnDefinitions = new("*,0,0") };
-    private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), FontSize = 12, Background = Brushes.Transparent };
+    private readonly ListBox packets = new() { FontFamily = new("Cascadia Mono,Consolas"), Background = Brushes.Transparent };
     private readonly TextBox search = new() { PlaceholderText = "Search packets, Hex or fields", Margin = new(14, 8) };
     private readonly StackPanel packetEmpty = new() { Spacing = 12, Margin = new(24, 28), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
     private readonly TextBlock packetEmptyText = Text("");
     private readonly Button packetEmptyAction;
     private PacketEmptyReason packetEmptyReason;
-    private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton, activityButton, issuesButton, resultsButton, keepResultButton;
+    private readonly Button waveTab, packetTab, detailButton, reloadButton, measureButton, keepResultButton;
     private readonly ScrollViewer waveScroll;
     private DemoExample activeExample = DemoCaptureSource.Examples[0];
     private readonly Control wavePanel, packetPanel;
@@ -66,39 +70,43 @@ public sealed partial class MainWindow : Window
     {
         Title = "DSView2 · Offline demo"; Width = 1380; Height = 850; MinWidth = 1024; MinHeight = 650;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        _shell = new(ShowActivity, () => _ = ShowTimingResultsAsync(), ShowIssues, ShowSettings);
         RestorePreferences();
-        workspace.ColumnDefinitions[0].MinWidth = 640;
-        var page = new Grid { RowDefinitions = new("44,44,Auto,Auto,*") };
-        var header = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,*,Auto,Auto"), Margin = new(16, 0) };
+        workspace.ColumnDefinitions[0].MinWidth = 480;
+        var page = new Grid { RowDefinitions = new("52,*") };
+        var header = _shell.Header;
         var brand = Text("DSView2"); brand.FontWeight = FontWeight.SemiBold; brand.Margin = new(0, 0, 20, 0);
-        Add(header, brand, 0, 0);
-        waveTab = Button("Waveforms", () => Model.SetTab(false), "flat"); packetTab = Button("Packets", () => Model.SetTab(true), "flat");
-        Add(header, waveTab, 0, 1); Add(header, packetTab, 0, 2);
-        var source = Button("", ShowInfo, "flat", "Capture source and acquisition details"); source.Content = status; source.HorizontalAlignment = HorizontalAlignment.Right; Add(header, source, 0, 3);
-        issuesButton = Button("Capture issues", ShowIssues, "flat", "Diagnostics across the entire capture, independent of Group and packet search"); issuesButton.Foreground = TimelineControl.Ink("#FF9AAA"); Add(header, issuesButton, 0, 4);
-        reloadButton = Button("File ▾", ShowFiles, tip: "Import a capture, or open and save an analysis"); reloadButton.Margin = new(10, 0, 0, 0); Add(header, reloadButton, 0, 5);
-        status.MaxWidth = 380; status.TextTrimming = TextTrimming.CharacterEllipsis;
+        Add(header, brand, 0);
+        var source = Button("", ShowInfo, "flat", "Capture source and acquisition details"); source.Content = status; source.HorizontalAlignment = HorizontalAlignment.Left; Add(header, source, 0, 1);
+        reloadButton = Button("File ▾", ShowFiles, "flat", "Import a capture, or open and save an analysis"); Add(header, reloadButton, 0, 2);
+        Add(header, _shell.Settings, 0, 3);
+        status.MaxWidth = 560; status.TextTrimming = TextTrimming.CharacterEllipsis;
         Add(page, Band(header), 0);
-        var groupBar = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,Auto,*,Auto,Auto,Auto"), Margin = new(16, 0) };
-        Add(groupBar, Text("Group", true), 0, 0); groupPicker.Margin = new(10, 0); groupPicker.ItemsSource = Model.Groups; groupPicker.SelectedItem = Model.Group;
-        groupPicker.SelectionChanged += (_, _) => { if (!updating && groupPicker.SelectedItem is ObservationGroup group) Model.SetGroup(group); };
-        Add(groupBar, groupPicker, 0, 1); Add(groupBar, Button("Edit", () => EditGroup(false), "flat", "Edit signal group"), 0, 2);
-        Add(groupBar, Button("All signals", Model.ShowAll, "flat"), 0, 3);
-        activityButton = Button("Activity", ShowActivity, "flat", "All captured channels: full-capture activity compared with the current time view"); activityButton.HorizontalAlignment = HorizontalAlignment.Left; Add(groupBar, activityButton, 0, 4);
-        detailButton = Button("Packet details", Model.ToggleDetails, "flat"); Add(groupBar, detailButton, 0, 5);
-        resultsButton = Button("Results", () => _ = ShowTimingResultsAsync(), "flat", "Kept timing results and notes"); Add(groupBar, resultsButton, 0, 6);
-        measureButton = Button("Cursor A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Choose two edges or positions, then drag either cursor to adjust it"); Add(groupBar, measureButton, 0, 7); Add(page, Band(groupBar), 1);
+        waveTab = Button("Waveforms", () => Model.SetTab(false), "flat"); packetTab = Button("Packets", () => Model.SetTab(true), "flat"); waveTab.Classes.Add("tab"); packetTab.Classes.Add("tab");
+        detailButton = IconButton("Packet details", ActionIcons.Details, Model.ToggleDetails);
+        measureButton = Button("Cursor A/B", () => { Model.SetMode(1); timeline!.FocusForPick(); }, "flat", "Choose two edges or positions, then drag either cursor to adjust it");
+        _shell.Groups.ItemsSource = Model.Groups; _shell.Groups.SelectedItem = Model.Group;
+        _shell.Groups.ItemTemplate = new FuncDataTemplate<ObservationGroup>((group, _) => { var text = Text(group?.Name ?? ""); text.TextTrimming = TextTrimming.CharacterEllipsis; ToolTip.SetTip(text, group?.Name); return text; });
+        AutomationProperties.SetName(_shell.Groups, "Signal Groups");
+        _shell.Groups.SelectionChanged += (_, _) => { if (!updating && _shell.Groups.SelectedItem is ObservationGroup group) { Model.SetGroup(group); _shell.DismissCompact(); } };
+        _shell.SetGroupContents(() => EditGroup(true), () => EditGroup(false));
+        var center = new Grid { RowDefinitions = new("44,Auto,Auto,*") };
+        var tabs = new Grid { ColumnDefinitions = new("Auto,Auto,Auto,*,Auto,Auto"), Margin = new(12, 0) };
+        Add(tabs, _shell.Toggle, 0); Add(tabs, waveTab, 0, 1); Add(tabs, packetTab, 0, 2);
+        _shell.ActiveGroup.TextTrimming = TextTrimming.CharacterEllipsis; _shell.ActiveGroup.Margin = new(16, 0); Add(tabs, _shell.ActiveGroup, 0, 3);
+        Add(tabs, measureButton, 0, 4); Add(tabs, detailButton, 0, 5); Add(center, Band(tabs), 0);
         var nav = navigation;
-        Add(nav, Button("←", Model.Previous, "flat", "Previous view"), 0, 0); Add(nav, Button("Fit time", Model.FitTime, "flat"), 0, 1);
-        Add(nav, Button("−", () => Model.Zoom(1.5), "flat", "Zoom out"), 0, 2); Add(nav, Button("+", () => Model.Zoom(1 / 1.5), "flat", "Zoom in"), 0, 3);
-        range.Margin = new(14, 0); Add(nav, range, 0, 4); Add(nav, Text("Edges", true), 0, 5);
-        edgeChannel.Margin = new(8, 0, 4, 0); ToolTip.SetTip(edgeChannel, "Signal for previous / next edge"); AutomationProperties.SetName(edgeChannel, "Edge navigation signal"); Add(nav, edgeChannel, 0, 6);
+        Add(nav, IconButton("Previous view", ActionIcons.Back, Model.Previous), 0);
+        Add(nav, IconButton("Fit full capture", ActionIcons.Fit, Model.FitTime), 0, 1);
+        range.Margin = new(14, 0); range.TextTrimming = TextTrimming.CharacterEllipsis; Add(nav, range, 0, 2);
+        edgeChannel.Margin = new(4, 0); ToolTip.SetTip(edgeChannel, "Signal for previous / next edge"); AutomationProperties.SetName(edgeChannel, "Edge navigation signal");
         edgeChannel.SelectionChanged += (_, _) => { if (!updating) ScheduleTitleUpdate(); };
         previousEdgeButton = Button("‹", () => Model.StepEdge(SelectedEdgeChannel(), -1), "flat", "Previous edge");
         nextEdgeButton = Button("›", () => Model.StepEdge(SelectedEdgeChannel(), 1), "flat", "Next edge");
-        Add(nav, previousEdgeButton, 0, 7); Add(nav, nextEdgeButton, 0, 8);
-        guide.HorizontalAlignment = HorizontalAlignment.Right; Add(nav, guide, 0, 9); Add(page, nav, 2);
-        overview = new TimelineControl(Model, true); Add(page, overview, 3);
+        _shell.SetEdges(edgeChannel, previousEdgeButton, nextEdgeButton, flyout => { openPanel?.Hide(); openPanel = flyout; });
+        Add(nav, _shell.Edges!.Toggle, 0, 3);
+        guide.HorizontalAlignment = HorizontalAlignment.Right; guide.Margin = new(12, 0, 0, 0); Add(nav, guide, 0, 4); Add(center, nav, 1);
+        overview = new TimelineControl(Model, true); Add(center, overview, 2);
         timeline = new TimelineControl(Model); timeline.ColorRequested += EditColor;
         timeline.EditingCancelled += CancelEditing;
         timeline.KeyboardModeChanged += enabled => guide.Text = enabled ? "↑↓ signal · ←→ edge / sample · Enter select · Esc cancel" : "Wheel to zoom · Shift + wheel to scroll signals";
@@ -130,18 +138,21 @@ public sealed partial class MainWindow : Window
         packetEmptyText.TextWrapping = TextWrapping.Wrap; packetEmptyText.MaxWidth = 420;
         packetEmptyAction = Button("", RecoverPackets, "flat"); packetEmptyAction.HorizontalAlignment = HorizontalAlignment.Left;
         packetEmpty.Children.Add(packetEmptyText); packetEmpty.Children.Add(packetEmptyAction); Add(packetGrid, packetEmpty, 1);
-        packets.ItemTemplate = new FuncDataTemplate<Packet>((packet, _) => Text(packet == null ? "" : TimingText.Packet(packet, Model.Capture!.SampleRate)));
+        packets.ItemTemplate = new FuncDataTemplate<Packet>((packet, _) => { var text = Text(packet == null ? "" : TimingText.Packet(packet, Model.Capture!.SampleRate)); text.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("DataFontSize")); return text; });
         search.TextChanged += (_, _) => { if (!updating) Model.Search(search.Text ?? ""); };
         packets.SelectionChanged += (_, _) => { if (!updating && packets.SelectedItem is Packet packet) Model.Select(packet); };
         var work = new Grid(); work.Children.Add(wavePanel); work.Children.Add(packetPanel); Add(workspace, work, 0, 0); Add(workspace, splitter, 0, 1);
         inspectorBorder = new Border { BorderBrush = TimelineControl.Ink("#26343F"), BorderThickness = new(1, 0, 0, 0), Child = new ScrollViewer { Content = inspector, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled } };
-        Add(workspace, inspectorBorder, 0, 2); Add(page, workspace, 4);
-        var result = new Grid { ColumnDefinitions = new("152,*,Auto") };
-        measurementTitle.TextTrimming = TextTrimming.CharacterEllipsis; measurementTitle.Margin = new(0, 0, 10, 0); Add(result, measurementTitle, 0, 0);
-        delta.Foreground = TimelineControl.Ink("#C9F1EA"); delta.FontFamily = new("Cascadia Mono,Consolas"); delta.FontSize = 14; delta.TextWrapping = TextWrapping.Wrap; Add(result, delta, 0, 1);
-        measurementActions.Spacing = 6; measurementActions.Margin = new(8, 0, 0, 0);
+        Add(workspace, inspectorBorder, 0, 2); Add(center, workspace, 3);
+        Grid.SetColumn(center, 1); _shell.Body.Children.Insert(0, center);
+        Add(page, _shell.Body, 1); Add(page, _settingsView, 1);
+        SizeChanged += (_, _) => UpdateShellLayout();
+        var result = new Grid { ColumnDefinitions = new("Auto,*"), RowDefinitions = new("Auto,Auto") };
+        measurementTitle.TextTrimming = TextTrimming.CharacterEllipsis; measurementTitle.MaxWidth = 152; measurementTitle.Margin = new(0, 0, 14, 0); Add(result, measurementTitle, 0, 0);
+        delta.Foreground = TimelineControl.Ink("#C9F1EA"); delta.FontFamily = new("Cascadia Mono,Consolas"); delta.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("DataLargeFontSize")); delta.TextWrapping = TextWrapping.Wrap; Add(result, delta, 0, 1);
+        measurementActions.Spacing = 6; measurementActions.Margin = new(0, 4, 0, 0);
         measurementActions.Children.Add(modePicker); measurementActions.Children.Add(Button("Cancel", CancelEditing, "flat"));
-        measurementActions.Children.Add(Button("Fit", Model.FitMarkers, "flat", "Fit current measurement evidence, including its complete cycle, and reveal source rows")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat", "Clear measurement")); Add(result, measurementActions, 0, 2);
+        measurementActions.Children.Add(Button("Fit", Model.FitMarkers, "flat", "Fit current measurement evidence, including its complete cycle, and reveal source rows")); measurementActions.Children.Add(Button("Clear", Model.Clear, "flat", "Clear measurement")); Add(result, measurementActions, 1); Grid.SetColumnSpan(measurementActions, 2);
         keepResultButton = Button("Keep result", KeepTimingResult, "flat", "Keep a copy of this measurement in the analysis"); measurementActions.Children.Add(keepResultButton);
         modePicker.SelectionChanged += (_, _) => { if (!updating) Model.SetSnapMode(modePicker.SelectedIndex == 1 ? 2 : 1); };
         foreach (var (label, box, index) in new[] { (aSource, aTime, 0), (bSource, bTime, 1) })
@@ -163,7 +174,7 @@ public sealed partial class MainWindow : Window
         aTime.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitTime(0, aTime); }; bTime.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitTime(1, bTime); };
         aTime.LostFocus += (_, _) => CommitTime(0, aTime); bTime.LostFocus += (_, _) => CommitTime(1, bTime);
         hint.TextWrapping = TextWrapping.Wrap; measurement.Children.Add(result); measurement.Children.Add(endpoints); measurement.Children.Add(hint); Add(waveformGrid, Band(measurement), 1);
-        Content = page; Model.Changed += Refresh;
+        WireAppearance(); Content = page; Model.Changed += Refresh;
         Model.Changed += ScheduleTitleUpdate;
         titleUpdate.Tick += (_, _) => { titleUpdate.Stop(); UpdateAnalysisTitle(); };
         aTime.TextChanged += (_, _) => ScheduleTitleUpdate(); bTime.TextChanged += (_, _) => ScheduleTitleUpdate();
@@ -171,6 +182,7 @@ public sealed partial class MainWindow : Window
         Closed += (_, _) => { titleUpdate.Stop(); loadCancellation?.Cancel(); ++generation; };
         KeyDown += (_, e) =>
         {
+            if (_settingsView.Model.IsOpen) { if (e.Key == Key.Escape && _settingsView.Model.CancelCommand.CanExecute(null)) { _settingsView.Model.CancelCommand.Execute(null); e.Handled = true; } return; }
             if (openingFile) { if (e.Key == Key.Escape) { loadCancellation?.Cancel(); e.Handled = true; } return; }
             if (e.KeyModifiers == KeyModifiers.Control && e.Key == Key.O) { e.Handled = true; _ = OpenAnalysisAsync(); return; }
             if (e.Key == Key.S && (e.KeyModifiers == KeyModifiers.Control || e.KeyModifiers == (KeyModifiers.Control | KeyModifiers.Shift)))
@@ -179,8 +191,34 @@ public sealed partial class MainWindow : Window
             if (Model.Armed != null || aTime.IsFocused || bTime.IsFocused) { CancelEditing(); e.Handled = true; }
             else if (Model.Details) Model.ToggleDetails();
         };
-        Refresh();
+        Refresh(); UpdateShellLayout();
     }
+    private void WireAppearance()
+    {
+        void RefreshAppearance()
+        {
+            var value = _settingsView.Model.Current; AppearanceResources.Apply(value);
+            timeline.ApplyAppearance(value); ruler.ApplyAppearance(value); overview.ApplyAppearance(value);
+            _settingsView.IsVisible = _settingsView.Model.IsOpen; _shell.Body.IsEnabled = !_settingsView.Model.IsOpen && !openingFile;
+            foreach (var child in _shell.Header.Children)
+                child.IsEnabled = !_settingsView.Model.IsOpen && (!openingFile || ReferenceEquals(child, reloadButton)) || ReferenceEquals(child, _shell.Settings);
+        }
+        _settingsView.Model.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(AppearanceSettingsViewModel.Current)) RefreshAppearance(); };
+        RefreshAppearance();
+    }
+    private void ShowSettings()
+    {
+        if (fileBusy) return;
+        openPanel?.Hide(); openPanel = null;
+        var command = _settingsView.Model.IsOpen ? _settingsView.Model.CancelCommand : _settingsView.Model.OpenCommand;
+        if (command.CanExecute(null)) command.Execute(null);
+    }
+    private void UpdateShellLayout()
+    {
+        _shell.SetWidth(Bounds.Width > 0 ? Bounds.Width : Width);
+        guide.IsVisible = Model.Signals.Count > 0 && Bounds.Width >= 1450;
+    }
+    private static Button IconButton(string label, string path, Action action) => ActionIcons.Button(label, path, new RelayCommand(action));
     private int SelectedEdgeChannel() => edgeChannel.SelectedItem is string str && int.TryParse(str.AsSpan(1), out var id) ? id : Model.Group.Channels.FirstOrDefault();
     private void UpdateRulerWidth() => ruler.Width = Model.Signals.Count > 0 ? timeline.Bounds.Width : wavePanel.Bounds.Width;
     private string CurrentSourceName => string.IsNullOrEmpty(sessionSourceName) ? activeExample.Name : sessionSourceName;
@@ -215,11 +253,11 @@ public sealed partial class MainWindow : Window
         if (updating) return; updating = true;
         try
         {
-            openPanel?.Hide(); openPanel = null;
-            groupPicker.SelectedItem = Model.Group; activityButton.Content = $"Activity · {Model.Capture?.Signals.Count ?? 0} signals";
-            AutomationProperties.SetName(activityButton, $"Activity · {Model.Signals.Count} visible of {Model.Capture?.Signals.Count ?? 0} captured signals");
-            issuesButton.Content = $"Capture issues · {Model.Issues.Count}"; issuesButton.IsVisible = Model.Issues.Count > 0;
-            resultsButton.Content = $"Results · {Model.Measurements.Count}"; resultsButton.IsVisible = Model.Measurements.Count > 0 || Model.CanUndoMeasurementRemoval;
+            if (!ReferenceEquals(openPanel, _shell.Edges)) { openPanel?.Hide(); openPanel = null; }
+            _shell.Groups.SelectedItem = Model.Group; _shell.ActiveGroup.Text = Model.Group.Name; _shell.Activity.Content = $"Activity · {Model.Capture?.Signals.Count ?? 0} signals";
+            AutomationProperties.SetName(_shell.Activity, $"Activity · {Model.Signals.Count} visible of {Model.Capture?.Signals.Count ?? 0} captured signals");
+            _shell.Issues.Content = $"Capture issues · {Model.Issues.Count}"; _shell.Issues.IsVisible = Model.Issues.Count > 0;
+            _shell.Results.Content = $"Results · {Model.Measurements.Count}"; _shell.Results.IsVisible = Model.Measurements.Count > 0 || Model.CanUndoMeasurementRemoval;
             keepResultButton.IsVisible = Model.A != null && Model.B != null && !Model.HasPendingEdit;
             range.Text = Model.RangeText;
             if (search.Text != Model.Query) search.Text = Model.Query;
@@ -234,7 +272,7 @@ public sealed partial class MainWindow : Window
                 : "This Group has no signals in the current capture.";
             waveEmptyAction.Content = Model.Capture?.Signals.Count > 0 ? "Show all signals" : "Choose source";
             measureButton.IsEnabled = edgeChannel.IsEnabled = previousEdgeButton.IsEnabled = nextEdgeButton.IsEnabled = hasSignals;
-            guide.IsVisible = hasSignals;
+            guide.IsVisible = hasSignals && Bounds.Width >= 1450;
             foreach (var choose in endpointPickButtons) choose.IsEnabled = hasSignals;
             waveTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#9BAEBF") : TimelineControl.Ink("#78D7C8"); packetTab.Foreground = Model.PacketsTab ? TimelineControl.Ink("#78D7C8") : TimelineControl.Ink("#9BAEBF");
             if (Model.PacketsTab)
@@ -277,6 +315,7 @@ public sealed partial class MainWindow : Window
             if (!showDetails) { workspace.ColumnDefinitions[1].Width = new(0); workspace.ColumnDefinitions[2].Width = new(0); }
             inspectorBorder.IsVisible = splitter.IsVisible = showDetails; detailButton.IsVisible = Model.Selected != null && !showDetails;
             if (showDetails && (!ReferenceEquals(renderedPacket, Model.Selected) || !ReferenceEquals(renderedIssue, Model.SelectedIssue) || renderedProtocolIndex != Model.SelectedProtocolIndex)) { RenderInspector(); renderedPacket = Model.Selected; renderedIssue = Model.SelectedIssue; renderedProtocolIndex = Model.SelectedProtocolIndex; }
+            UpdateShellLayout();
             packetContext.Text = Model.PacketSelectionContext;
             packetContext.IsVisible = !string.IsNullOrEmpty(packetContext.Text);
         }
@@ -362,7 +401,7 @@ public sealed partial class MainWindow : Window
         inspector.Children.Clear(); var packet = Model.Selected!;
         if (!ReferenceEquals(renderedPacket, packet)) bytePage = 0;
         var heading = new Grid { ColumnDefinitions = new("*,Auto") }; Add(heading, Text(packet.Decoder.ToUpperInvariant() + " / " + packet.Id, true), 0, 0); Add(heading, Button("×", Model.ToggleDetails, "flat", "Close packet details"), 0, 1); inspector.Children.Add(heading);
-        var title = Text(packet.Title); title.FontSize = 15; title.FontWeight = FontWeight.SemiBold; title.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(title);
+        var title = Text(packet.Title); title.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("HeadingFontSize")); title.FontWeight = FontWeight.SemiBold; title.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(title);
         inspector.Children.Add(Text(TimeAxis.FormatRange(packet.Span.Start, packet.Span.End, Model.Capture!.SampleRate), true));
         packetContext.TextWrapping = TextWrapping.Wrap; inspector.Children.Add(packetContext);
         inspector.Children.Add(Text(packet.Address + (packet.I2c is { AddressObserved: true } wire ? wire.Read ? " · Read" : " · Write" : "") + " · " + packet.Bytes.Length + " data bytes"));
@@ -374,7 +413,7 @@ public sealed partial class MainWindow : Window
             {
                 var row = new Grid { ColumnDefinitions = new("*,Auto") }; Add(row, Text(field.Name), 0, 0);
                 var value = field.Name == "Payload" && packet.Value is int number ? $"0x{number:X4}" : "0x" + string.Join("", field.Raw.Select(b => b.ToString("X2")));
-                var fieldValue = Text(value); fieldValue.FontFamily = new("Cascadia Mono,Consolas"); Add(row, fieldValue, 0, 1); inspector.Children.Add(row);
+                var fieldValue = Text(value); fieldValue.FontFamily = new("Cascadia Mono,Consolas"); fieldValue.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension("DataFontSize")); Add(row, fieldValue, 0, 1); inspector.Children.Add(row);
                 if (Model.SelectedProtocol is { Kind: "data" } part && field.Spans.Any(s => s.Start < part.Span.End && s.End > part.Span.Start))
                 { row.Background = TimelineControl.Ink("#173C39"); ToolTip.SetTip(row, "Field source overlaps the selected decoded interval"); }
                 if (Model.Issues.Any(i => ReferenceEquals(i.Packet, packet) && i.Diagnostic.Field == field.Name))
@@ -412,7 +451,7 @@ public sealed partial class MainWindow : Window
             var show = Button("Show", () => Model.ShowSignal(signal.Id), "flat", "Reveal this channel without changing time"); AutomationProperties.SetName(show, $"Show D{signal.Id} {signal.Name}"); Add(row, show, 0, 3); rows.Children.Add(row);
         }
         body.Children.Add(new ScrollViewer { Content = rows, MaxHeight = 360, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled });
-        openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(activityButton);
+        openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(_shell.Activity);
     }
     private void ShowIssues()
     {
@@ -427,7 +466,7 @@ public sealed partial class MainWindow : Window
             row.Children.Add(Text($"{issue.Packet.Id} · {TimeAxis.FormatRange(span.Start, span.End, Model.Capture!.SampleRate)} · " + (issue.Diagnostic.Field ?? "annotated interval"), true));
             var locate = Button("Locate issue", () => Model.LocateIssue(issue), "flat"); AutomationProperties.SetName(locate, $"Locate issue {issue.Diagnostic.Layer} {issue.Diagnostic.Message}"); row.Children.Add(locate); rows.Children.Add(row);
         }
-        body.Children.Add(new ScrollViewer { Content = rows, MaxHeight = 360 }); openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(issuesButton);
+        body.Children.Add(new ScrollViewer { Content = rows, MaxHeight = 360 }); openPanel = new Flyout { Content = body }; openPanel.FlyoutPresenterClasses.Add("analysis"); openPanel.ShowAt(_shell.Issues);
     }
     private async void EditGroup(bool create)
     {
@@ -469,7 +508,7 @@ public sealed partial class MainWindow : Window
             {
                 var signal = Model.Capture?.Signals.FirstOrDefault(s => s.Id == id);
                 string label = $"D{id}" + (signal == null ? "" : "  " + signal.Name);
-                var check = new CheckBox { Content = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap }, IsChecked = draft.Channels.Contains(id), FontSize = 13, Margin = new(0, 0, 10, 6), HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                var check = new CheckBox { Content = new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap }, IsChecked = draft.Channels.Contains(id), Margin = new(0, 0, 10, 6), HorizontalContentAlignment = HorizontalAlignment.Stretch };
                 AutomationProperties.SetName(check, label + (missing ? " · Not captured" : "")); checks[id] = check;
                 check.IsCheckedChanged += (_, _) => { if (changing) return; draft.SetChannel(id, check.IsChecked == true); RefreshChecks(); }; channelGrid.Children.Add(check);
             }
@@ -549,7 +588,11 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { status.Text = "Settings could not be saved: " + ex.Message; }
     }
     private sealed record Preferences(int Version, string ActiveGroup, ObservationGroup[] Groups, Dictionary<int, string> Colors);
-    private static TextBlock Text(string value, bool muted = false) => new() { Text = value, VerticalAlignment = VerticalAlignment.Center, Foreground = TimelineControl.Ink(muted ? "#9BAEBF" : "#E4EAF0"), FontSize = muted ? 12 : 13 };
+    private static TextBlock Text(string value, bool muted = false)
+    {
+        var text = new TextBlock { Text = value, VerticalAlignment = VerticalAlignment.Center, Foreground = TimelineControl.Ink(muted ? "#9BAEBF" : "#E4EAF0") };
+        text.Bind(TextBlock.FontSizeProperty, new DynamicResourceExtension(muted ? "CaptionFontSize" : "BodyFontSize")); return text;
+    }
     private static StackPanel Row() => new() { Orientation = Orientation.Horizontal, Spacing = 10, VerticalAlignment = VerticalAlignment.Center };
     private static Button Button(string label, Action action, string? style = null, string? tip = null) { var button = new Button { Content = label, VerticalAlignment = VerticalAlignment.Center }; if (style != null) button.Classes.Add(style); if (tip != null) { ToolTip.SetTip(button, tip); if (string.IsNullOrWhiteSpace(label) || label is "←" or "−" or "+" or "‹" or "›" or "×") AutomationProperties.SetName(button, tip); } button.Click += (_, _) => action(); return button; }
     private static Border Band(Control child) => new() { BorderThickness = new(0, 0, 0, 1), BorderBrush = TimelineControl.Ink("#26343F"), Child = child };

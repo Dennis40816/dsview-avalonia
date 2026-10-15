@@ -6,6 +6,9 @@ using DSView.Infrastructure;
 
 int passed = 0;
 void Check(bool value, string name) { if (!value) throw new Exception(name); Console.WriteLine("PASS " + name); passed++; }
+await DisplayPreferencesChecks.RunAsync(Check);
+await AppearanceStorageChecks.RunAsync(Check);
+if (args.Contains("--display-preferences-only")) { Console.WriteLine($"{passed} appearance checks passed."); return; }
 var capture = await DemoCaptureSource.LoadAsync();
 var clock = capture.MeasureAt(0, 25025);
 Check(clock is { High: false, WidthSamples: 63, PeriodSamples: 125, HighSamples: 62 } && TimingText.Local(clock, capture.SampleRate).Contains("400 kHz"), "Low width and complete same-polarity cycle yield 1.26 us and 400 kHz");
