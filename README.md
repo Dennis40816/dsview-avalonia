@@ -24,6 +24,18 @@ matching USB devices without opening them. Connection, capability readback and
 live acquisition are not yet implemented or exposed as App controls.
 **License clearance is incomplete; no binary releases yet.**
 
+The development branch includes generated Clock, I²C + Interrupt, UART 8N1 and
+SPI Mode 0 acquisitions through the shared background capture pipeline. Stop
+retains a partial capture for explicit acceptance; Cancel keeps the current
+analysis. See [Demo mode](docs/DEMO-MODE.md) and [acquisition](docs/ACQUISITION.md).
+
+**Work in progress:** the latest checkpoint adds provisional preview polling to
+the acquisition view model. That wiring has not been built or tested. Preview
+rendering and XAML bindings are still missing, so incoming waveforms are not yet
+displayed during acquisition. The last validated backend checkpoint is `0884cee`;
+its earlier checks do not validate this unfinished UI wiring. Native usability
+acceptance and physical hardware capture remain outstanding.
+
 The workbench supports one signal Group at a time, all-channel navigation,
 custom waveform colors, Hex packet details, local high/low pulse width and
 complete-cycle period/frequency, and cross-channel A/B edge or position timing.

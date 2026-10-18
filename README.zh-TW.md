@@ -17,6 +17,15 @@ SPDX-License-Identifier: GPL-3.0-or-later
 選用的 Windows 開發用 reader 已能匯入部分 DSView logic-v3 `.dsl`／`.demo` 原始訊號；硬體擷取及通用格式支援仍待完成。
 **授權清查尚未完成，目前不提供 binary 發行。**
 
+開發分支已有 Clock、I²C + Interrupt、UART 8N1 與 SPI Mode 0 的生成式擷取，
+共用背景擷取流程。Stop 保留部分資料供確認採用，Cancel 保留目前分析。
+詳見 [Demo 模式](docs/DEMO-MODE.md) 與 [擷取流程](docs/ACQUISITION.md)。
+
+**未完成草稿：**最新進度加入擷取 ViewModel 的預覽輪詢，但尚未建置或測試。
+預覽繪製與 XAML 綁定還沒接入，因此擷取中尚不會顯示新波形。
+最近已驗證的底層版本為 `0884cee`，當時的測試不涵蓋這份 UI 接線草稿。
+原生易用性驗收與實體硬體擷取仍待完成。
+
 已提供一次一個 Group、全部通道、自訂波形線色、Hex 封包內容、高／低脈寬、完整局部週期／頻率，以及跨通道 A/B edge／位置量測。
 捲動通道時時間尺保持可見。局部頻率不代表整段資料具有穩定的時鐘頻率。
 

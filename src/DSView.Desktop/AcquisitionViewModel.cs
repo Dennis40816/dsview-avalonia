@@ -17,6 +17,10 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     private readonly Action<AcquisitionResult> published;
     private readonly Func<DemoCaptureSettings, IAcquisitionSource> create;
     private readonly Action<string>? decodeRequested;
+    private readonly TimeProvider time;
+    private long? lastPreviewPoll;
+    private AcquisitionPreview? preview;
+    private int sessionGeneration;
     private AcquisitionSession? session;
     private Task<AcquisitionResult>? sourceTask;
     private Capture? observed;
@@ -26,11 +30,13 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     private string status = "";
     private double progress;
     public AcquisitionViewModel(Workbench model, Func<bool> available, Func<Task<bool>> confirmReplacement,
-        Action<AcquisitionResult> published, Func<DemoCaptureSettings, IAcquisitionSource>? create = null, Action<string>? decodeRequested = null)
+        Action<AcquisitionResult> published, Func<DemoCaptureSettings, IAcquisitionSource>? create = null, Action<string>? decodeRequested = null,
+        TimeProvider? time = null)
     {
         this.model = model; this.available = available; this.confirmReplacement = confirmReplacement;
         this.published = published; this.create = create ?? (settings => settings.CreateSource()); observed = model.Capture;
         this.decodeRequested = decodeRequested;
+        this.time = time ?? TimeProvider.System;
         StartCommand = new AsyncRelayCommand(StartAsync, () => CanEdit && Problem.Length == 0 && available());
         StopCommand = new RelayCommand(() => { stopping = true; session?.RequestStop(); Status = "Stopping…"; Refresh(); }, () => IsAcquiring && !stopping);
         PrimaryCommand = new RelayCommand(() =>
@@ -60,7 +66,26 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
         || s.Id == "demo-spi" && s.EffectiveProtocol == "spi");
     public bool CanDecodeDemo => decodeRequested != null && !IsBusy && !HasResult && DemoDecoder != null;
     public string DecodeLabel => DemoDecoder?.EffectiveProtocol switch { "uart" => "Decode UART", "spi" => "Decode SPI", _ => "Decode I²C" };
-    public bool IsOpen { get => open; set => SetProperty(ref open, value); }
+    public bool IsOpen
+    {
+        get => open;
+        set { if (SetProperty(ref open, value) && !value) Preview = null; }
+    }
+    public AcquisitionPreview? Preview
+    {
+        get => preview;
+        private set
+        {
+            if (ReferenceEquals(preview, value)) return;
+            preview = value; OnPropertyChanged(); OnPropertyChanged(nameof(HasPreview));
+            OnPropertyChanged(nameof(PreviewRange)); OnPropertyChanged(nameof(PreviewReduced));
+        }
+    }
+    public bool HasPreview => Preview != null;
+    public bool PreviewReduced => Preview?.WindowReduced == true;
+    public string PreviewRange => Preview is { } p
+        ? $"{TimingText.Duration(p.StartSample / (double)p.SampleRate)} – {TimingText.Duration(p.EndSample / (double)p.SampleRate)}" : "";
+    public bool ShowConfiguration => !IsAcquiring;
     public bool IsAcquiring => session != null && sourceTask?.IsCompleted != true;
     public bool IsBusy => StartCommand.IsRunning || AcceptCommand.IsRunning;
     public bool CanEdit => !disposed && !IsBusy && pending == null;
@@ -79,12 +104,23 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
         {
             var value = current.Progress; Progress = value.RetainedSamples * 100d / current.Plan.SampleLimit;
             if (!stopping) Status = value.Phase == AcquisitionPhase.Preparing ? "Preparing Demo…" : $"Acquiring Demo… {Progress:0}% · Current capture stays visible.";
+            if (!disposed && IsOpen && IsAcquiring && sessionGeneration == generation)
+            {
+                long now = time.GetTimestamp();
+                if (lastPreviewPoll == null || time.GetElapsedTime(lastPreviewPoll.Value, now) >= TimeSpan.FromMilliseconds(100))
+                {
+                    lastPreviewPoll = now;
+                    if (current.LatestPreview is { } next && next.Operation == current.Operation) Preview = next;
+                    if (!stopping) current.RequestPreview();
+                }
+            }
+            else Preview = null;
         }
         Refresh();
     }
     private void Refresh()
     {
-        foreach (string property in new[] { nameof(IsAcquiring), nameof(IsBusy), nameof(CanEdit), nameof(HasResult), nameof(PrimaryLabel), nameof(ShowStartIcon), nameof(ResultLabel), nameof(Problem), nameof(HasProblem), nameof(CanDecodeDemo) }) OnPropertyChanged(property);
+        foreach (string property in new[] { nameof(IsAcquiring), nameof(IsBusy), nameof(CanEdit), nameof(HasResult), nameof(PrimaryLabel), nameof(ShowStartIcon), nameof(ResultLabel), nameof(Problem), nameof(HasProblem), nameof(CanDecodeDemo), nameof(ShowConfiguration) }) OnPropertyChanged(property);
         StartCommand.NotifyCanExecuteChanged(); StopCommand.NotifyCanExecuteChanged(); PrimaryCommand.NotifyCanExecuteChanged();
         AcceptCommand.NotifyCanExecuteChanged(); DiscardCommand.NotifyCanExecuteChanged(); CancelCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(DecodeLabel)); DecodeDemoCommand.NotifyCanExecuteChanged();
@@ -94,7 +130,7 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
         if (applying) return;
         if (!ReferenceEquals(observed, model.Capture))
         {
-            observed = model.Capture; ++generation; session?.Cancel(); pending = null;
+            observed = model.Capture; ++generation; session?.Cancel(); pending = null; Preview = null;
             Status = "";
         }
         Refresh();
@@ -103,11 +139,12 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     {
         if (disposed || session != null || pending != null || !available() || Draft.TryCreate(out var settings).Length != 0) return;
         int request = ++generation; observed = model.Capture; stopping = false; Progress = 0; Status = "Preparing Demo…";
+        sessionGeneration = request; Preview = null; lastPreviewPoll = null; IsOpen = true;
         try
         {
             await using (var current = new AcquisitionSession(create(settings!)))
             {
-                session = current; sourceTask = current.RunAsync(); Refresh();
+                session = current; sourceTask = current.RunAsync(); Poll();
                 var result = await sourceTask;
                 if (disposed || request != generation || result.Operation != current.Operation) return;
                 if (result.IsWorkbenchCompatible) pending = result with { RawCapture = settings!.Configure(result.RawCapture!) };
@@ -121,7 +158,7 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
             }
         }
         catch (Exception ex) { if (request == generation) Status = "Acquisition failed. Current analysis kept. " + ex.Message; }
-        finally { session = null; sourceTask = null; Refresh(); }
+        finally { session = null; sourceTask = null; Preview = null; Refresh(); }
         if (request != generation || disposed) return;
         if (pending?.CanPublish == true) await PublishAsync();
         else if (pending != null) IsOpen = true;
@@ -153,7 +190,7 @@ internal sealed class AcquisitionViewModel : ObservableObject, IAsyncDisposable
     }
     public async Task StopAsync()
     {
-        ++generation; pending = null; session?.Cancel();
+        ++generation; pending = null; session?.Cancel(); Preview = null;
         var running = StartCommand.ExecutionTask; var accepting = AcceptCommand.ExecutionTask;
         if (running != null) await running;
         if (accepting != null) await accepting;
